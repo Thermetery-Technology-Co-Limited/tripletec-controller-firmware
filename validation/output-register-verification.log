@@ -1,0 +1,23 @@
+xPack Open On-Chip Debugger 0.12.0+dev-02228-ge5888bda3-dirty (2025-10-04-22:44)
+Licensed under GNU GPL v2
+For bug reports, read
+	http://openocd.org/doc/doxygen/bugs.html
+adapter speed: 1000 kHz
+none separate
+Info : Using CMSIS-DAPv2 interface with VID:PID=0x2e8a:0x000c, serial=E66598541B21AE38
+Info : CMSIS-DAP: SWD supported
+Info : CMSIS-DAP: Atomic commands supported
+Info : CMSIS-DAP: Test domain timer supported
+Info : CMSIS-DAP: FW Version = 2.0.0
+Info : CMSIS-DAP: Interface Initialised (SWD)
+Info : SWCLK/TCK = 0 SWDIO/TMS = 0 TDI = 0 TDO = 0 nTRST = 0 nRESET = 1
+Info : CMSIS-DAP: Interface ready
+Info : clock speed 1000 kHz
+Info : SWD DPIDR 0x1ba01477
+Info : [verify.mem] Examination succeed
+Info : [verify.mem] gdb port disabled
+0x40010800: b4b22224 
+0x4001080c: 0000a010 
+0x40000000: 00000000 
+0x40000020: 00000000 
+shutdown command invoked

@@ -1,0 +1,45 @@
+{
+  "schema": 1,
+  "sequence": 242,
+  "uptime_ms": 30000,
+  "outputs_locked_off": true,
+  "valid_flags": 35,
+  "sht31_errors": 0,
+  "ads1220_errors": 0,
+  "ambient_c": 25.585,
+  "rh_percent": 62.016,
+  "dewpoint_c": 17.766,
+  "target_c": 20.766,
+  "plate_c": [
+    null,
+    null,
+    null
+  ],
+  "ntc_adc_raw": [
+    6745424,
+    6745299,
+    6745281
+  ],
+  "current_adc_raw": [
+    2045,
+    417,
+    441
+  ],
+  "current_a_nominal": [
+    -0.076,
+    0.023,
+    0.096
+  ],
+  "applied_duty": [
+    0.0,
+    0.0,
+    0.0
+  ],
+  "active_faults": [
+    50,
+    50,
+    50
+  ],
+  "loop_count": 29236,
+  "button_pressed": false
+}

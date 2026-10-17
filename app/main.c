@@ -1,0 +1,261 @@
+#include "board.h"
+#include "controller.h"
+#include "telemetry.h"
+#include "sht31.h"
+#include "ads1220.h"
+#include "ntc.h"
+#include "current.h"
+
+#include <limits.h>
+#include <math.h>
+#include <stdio.h>
+#include <string.h>
+
+#if !defined(BENCH_OUTPUT_LOCK) || BENCH_OUTPUT_LOCK != 1 || BOARD_TEC_OUTPUTS_LOCKED_OFF != 1
+#error This image must hold all TEC outputs off.
+#endif
+
+volatile bench_telemetry_t g_telemetry;
+static tec_controller_t controller;
+static tec_inputs_t inputs;
+static tec_outputs_t outputs;
+static sht31_t sht;
+static ads1220_t ads;
+static ntc_config_t ntc_config;
+static current_config_t current_config[3];
+static int32_t ntc_codes[3];
+static uint16_t current_codes[3];
+static float current_amperes[3];
+static bool current_valid;
+static uint32_t sht_errors;
+static uint32_t ads_errors;
+static uint32_t loop_count;
+
+static bool sht_write(void *context, uint8_t address, const uint8_t *data, size_t count)
+{
+    (void)context;
+    return board_i2c_write(address, data, count, 25U);
+}
+
+static bool sht_read(void *context, uint8_t address, uint8_t *data, size_t count)
+{
+    (void)context;
+    return board_i2c_read(address, data, count, 25U);
+}
+
+static bool ads_transfer(void *context, const uint8_t *tx, uint8_t *rx, size_t count)
+{
+    bool ok;
+    (void)context;
+    board_ads1220_cs(true);
+    ok = board_spi_transfer(tx, rx, count, 25U);
+    board_ads1220_cs(false);
+    return ok;
+}
+
+static bool ads_ready(void *context)
+{
+    (void)context;
+    return board_ads1220_data_ready();
+}
+
+static int32_t milli(float value)
+{
+    if (!isfinite(value) || fabsf(value) > 2147483.0f) {
+        return INT32_MIN;
+    }
+    return (int32_t)lroundf(value * 1000.0f);
+}
+
+static void publish(uint32_t now)
+{
+    bench_telemetry_t next = {0};
+    const uint32_t sequence = g_telemetry.seq;
+    next.magic = UINT32_C(0x54454331);
+    next.seq = sequence + 1U;
+    next.schema = 1U;
+    next.uptime_ms = now;
+    next.outputs_locked = 1U;
+    next.sht_errors = sht_errors;
+    next.ads_errors = ads_errors;
+    next.ambient_mc = inputs.ambient_valid ? milli(inputs.ambient_c) : INT32_MIN;
+    next.rh_mpercent = inputs.ambient_valid ? milli(inputs.rh_percent) : INT32_MIN;
+    next.dewpoint_mc = milli(outputs.dewpoint_c);
+    next.target_mc = milli(outputs.target_c);
+    if (inputs.ambient_valid && now - inputs.ambient_timestamp_ms <= 2000U) {
+        next.valid_flags |= 1U;
+    }
+    if (ads.configuration_verified) {
+        next.valid_flags |= 2U;
+    }
+    for (size_t i = 0U; i < 3U; ++i) {
+        const bool fresh = inputs.plate[i].valid && now - inputs.plate[i].timestamp_ms <= 2000U;
+        next.plate_mc[i] = fresh ? milli(inputs.plate[i].temperature_c) : INT32_MIN;
+        next.ntc_adc_raw[i] = ntc_codes[i];
+        next.current_adc_raw[i] = current_codes[i];
+        next.current_ma[i] = current_valid ? milli(current_amperes[i]) : INT32_MIN;
+        next.applied_duty_milli[i] = 0U;
+        next.active_faults[i] = outputs.channel[i].active_faults;
+        if (fresh) {
+            next.valid_flags |= 1U << (i + 2U);
+        }
+    }
+    if (current_valid) {
+        next.valid_flags |= 1U << 5;
+    }
+    next.loop_count = loop_count;
+    next.button_pressed = board_button_pressed() ? 1U : 0U;
+    g_telemetry.seq = sequence + 1U;
+    __asm volatile("dmb" ::: "memory");
+    g_telemetry = next;
+    __asm volatile("dmb" ::: "memory");
+    g_telemetry.seq = sequence + 2U;
+}
+
+static void print_status(void)
+{
+    char text[256];
+    (void)snprintf(text, sizeof(text),
+        "TEC-BENCH v1 up=%lu lock=1 ambient_mC=%ld RH_mPct=%ld dew_mC=%ld target_mC=%ld "
+        "plate_mC=%ld,%ld,%ld valid=0x%lx sht_err=%lu ads_err=%lu PWM=0,0,0\r\n",
+        (unsigned long)g_telemetry.uptime_ms, (long)g_telemetry.ambient_mc,
+        (long)g_telemetry.rh_mpercent, (long)g_telemetry.dewpoint_mc,
+        (long)g_telemetry.target_mc, (long)g_telemetry.plate_mc[0],
+        (long)g_telemetry.plate_mc[1], (long)g_telemetry.plate_mc[2],
+        (unsigned long)g_telemetry.valid_flags, (unsigned long)sht_errors,
+        (unsigned long)ads_errors);
+    board_uart_write(text);
+}
+
+static void uart_commands(void)
+{
+    static char command[32];
+    static size_t used;
+    uint8_t byte;
+    /* Bound RX service even if an external peer floods the UART. */
+    for (unsigned count = 0U; count < 32U && board_uart_read_nonblocking(&byte); ++count) {
+        if (byte == '\r' || byte == '\n') {
+            command[used] = '\0';
+            if (strcmp(command, "status") == 0) {
+                print_status();
+            } else if (used != 0U) {
+                board_uart_write("Bench commands: status, help. TEC outputs are locked OFF.\r\n");
+            }
+            used = 0U;
+        } else if (byte >= 32U && byte <= 126U && used < sizeof(command) - 1U) {
+            command[used++] = (char)byte;
+        }
+    }
+}
+
+int main(void)
+{
+    tec_config_t config;
+    const sht31_bus_t sht_bus = {.context = NULL, .write = sht_write, .read = sht_read};
+    const ads1220_bus_t ads_bus = {.context = NULL, .transfer = ads_transfer, .data_ready = ads_ready};
+    uint32_t last_sht = 0U, last_control = 0U, last_current = 0U;
+    uint32_t last_publish = 0U, last_uart = 0U;
+    size_t next_ads_channel = 0U;
+
+    board_init();
+    tec_config_defaults(&config);
+    (void)tec_controller_init(&controller, &config);
+    inputs.hardware_verified = false; /* No runtime command can remove bench lock. */
+    (void)sht31_init(&sht, &sht_bus, 0x44U);
+    (void)ads1220_init(&ads, &ads_bus);
+    ntc_config_defaults(&ntc_config);
+    for (size_t i = 0U; i < 3U; ++i) {
+        (void)current_config_defaults(i, &current_config[i]);
+        current_amperes[i] = NAN;
+        ntc_codes[i] = INT32_MIN;
+    }
+    /* Both sensors have been powered throughout USB attachment. This explicit
+     * delay also covers their power-up time after a standalone cold start. */
+    board_delay_ms(20U);
+    board_watchdog_start();
+    tec_controller_step(&controller, &inputs, board_millis(), &outputs);
+    publish(board_millis());
+    board_uart_write("TripleTECDriver bench firmware: dew point +3C; outputs permanently OFF.\r\n");
+
+    for (;;) {
+        uint32_t now = board_millis();
+        board_outputs_force_off();
+        ++loop_count;
+
+        if (!sht.busy && (now - last_sht >= 500U || last_sht == 0U)) {
+            last_sht = now;
+            if (!sht31_start(&sht, now)) {
+                ++sht_errors;
+                inputs.ambient_valid = false;
+            }
+        }
+        if (sht.busy) {
+            const sht31_status_t status = sht31_poll(&sht, now);
+            if (status == SHT31_READY) {
+                inputs.ambient_c = sht.temperature_c;
+                inputs.rh_percent = sht.rh_percent;
+                inputs.ambient_timestamp_ms = sht.sample_timestamp_ms;
+                inputs.ambient_valid = true;
+            } else if (status == SHT31_ERROR) {
+                inputs.ambient_valid = false;
+                ++sht_errors;
+            }
+        }
+
+        if (!ads.busy) {
+            if (!ads1220_start(&ads, next_ads_channel, now)) {
+                inputs.plate[next_ads_channel].valid = false;
+                ++ads_errors;
+                next_ads_channel = (next_ads_channel + 1U) % 3U;
+            }
+        } else {
+            const ads1220_status_t status = ads1220_poll(&ads, now);
+            if (status == ADS1220_READY) {
+                ntc_result_t ntc;
+                ntc_codes[ads.channel] = ads.raw;
+                inputs.plate[ads.channel].valid = ntc_from_ads1220(ads.raw, &ntc_config, &ntc);
+                if (inputs.plate[ads.channel].valid) {
+                    inputs.plate[ads.channel].temperature_c = ntc.temperature_c;
+                    inputs.plate[ads.channel].timestamp_ms = ads.sample_timestamp_ms;
+                }
+                next_ads_channel = (ads.channel + 1U) % 3U;
+            } else if (status == ADS1220_ERROR) {
+                inputs.plate[ads.channel].valid = false;
+                ++ads_errors;
+                next_ads_channel = (ads.channel + 1U) % 3U;
+            }
+        }
+
+        now = board_millis();
+        if (now - last_current >= 250U) {
+            last_current = now;
+            current_valid = board_current_read_raw(current_codes, 25U);
+            for (size_t i = 0U; i < 3U; ++i) {
+                current_result_t current;
+                if (current_valid && current_from_adc12(current_codes[i], 3.3f,
+                                                         &current_config[i], &current)) {
+                    current_amperes[i] = current.amperes;
+                } else {
+                    current_valid = false;
+                    current_amperes[i] = NAN;
+                }
+            }
+        }
+        if (now - last_control >= 50U) {
+            last_control = now;
+            tec_controller_step(&controller, &inputs, now, &outputs);
+        }
+        if (now - last_publish >= 250U) {
+            last_publish = now;
+            publish(now);
+        }
+        if (now - last_uart >= 1000U) {
+            last_uart = now;
+            print_status();
+        }
+        uart_commands();
+        board_outputs_force_off();
+        board_watchdog_feed();
+        board_delay_ms(1U);
+    }
+}

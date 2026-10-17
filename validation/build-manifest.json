@@ -1,0 +1,87 @@
+{
+  "recorded_at": "2026-10-18T01:00:32.0732688+08:00",
+  "image": "build/stm32/tripletec-bench.bin",
+  "image_sha256": "cd3f0a12f171839f05a074e4436103004b1d7ca4c1e10ccf6e721c2679c1b8da",
+  "tests": [
+    "dewpoint C: passed",
+    "controller C: passed",
+    "sensor C: passed",
+    "telemetry Python: 5 passed"
+  ],
+  "flash_verify": "Verified OK",
+  "outputs_locked_off": true,
+  "sources": [
+    {
+      "path": "app/main.c",
+      "sha256": "3f02b7d6ce516cdce800c43704cbfc8b026dc9dafd8eb7c00c3ce8ec1e0573cc"
+    },
+    {
+      "path": "app/telemetry.h",
+      "sha256": "51e91cb0a42d0003fbd0a82c004895209c8e30319c8c03bec5144110a2951d24"
+    },
+    {
+      "path": "core/controller.c",
+      "sha256": "c57a6c35e34bb5474539336ec58de408955f82c2c05b5b1de8b6d6168d73497a"
+    },
+    {
+      "path": "core/controller.h",
+      "sha256": "84cc855f9f52de4c4825da9f76b3e83c2ca9e07c8005db62c8ba71b5f226106e"
+    },
+    {
+      "path": "core/dewpoint.c",
+      "sha256": "69a5d82b7c3342eff49711868f25deeb56819f7250d507f221f7ab7de132b55a"
+    },
+    {
+      "path": "core/dewpoint.h",
+      "sha256": "38650bacf297383617a3d805b29332630ed549ed75db8252ab23649b8ac1b6cb"
+    },
+    {
+      "path": "sensors/ads1220.c",
+      "sha256": "1b43a789507792d8f5989a00938dbcd5fbdef8c3efa1053f2ce18e41be8df984"
+    },
+    {
+      "path": "sensors/ads1220.h",
+      "sha256": "d7ccfe87fa19216f7869b32d32e2f79edf277f4f03116e50ff4ee1d1db5dbfe4"
+    },
+    {
+      "path": "sensors/current.c",
+      "sha256": "2097550e2148379c3b40eb2a984cc0fd7d7921bf012b18478b4570b57763fde3"
+    },
+    {
+      "path": "sensors/current.h",
+      "sha256": "73a64552e0b07f5d64d8c9672280c57b4c61e6e8d0cef653d2cd678591290e41"
+    },
+    {
+      "path": "sensors/ntc.c",
+      "sha256": "0e3bdb7a8ca0a80e37126dbe143914efecc60e4e9e31379d3f8fe81245be3ee8"
+    },
+    {
+      "path": "sensors/ntc.h",
+      "sha256": "ec83ffe0ff2d730ec93f037aaf1c22d0210de9b47bc0d34b004870ed185ec5c0"
+    },
+    {
+      "path": "sensors/sht31.c",
+      "sha256": "179f4a2a85f24d03296867debf7893aaaf9c869c1981c4cdfd0a9635625c88cd"
+    },
+    {
+      "path": "sensors/sht31.h",
+      "sha256": "f52530b7a5e0734ba5ab63dbce6e5f70bc67e104632fb64a7caea65dd88d2220"
+    },
+    {
+      "path": "platform/stm32f103/board.c",
+      "sha256": "4683c904f02ede1298ce92c744f3f02a89874262d22052aa290c9ad125b29483"
+    },
+    {
+      "path": "platform/stm32f103/board.h",
+      "sha256": "4d270c616d563f7b826e2a5a946c4ae5755bff7d64b006b1224de7c2b1d1d9d8"
+    },
+    {
+      "path": "platform/stm32f103/startup.c",
+      "sha256": "a8b5dda6ccc8444f3788d0163bb08db692dc6e11244e41b4abf866f217e0fc59"
+    },
+    {
+      "path": "platform/stm32f103/stm32f103rc.ld",
+      "sha256": "1db738138cd7899394be2fea3cfb2f38d15d0e027da8a0a30708270542689304"
+    }
+  ]
+}

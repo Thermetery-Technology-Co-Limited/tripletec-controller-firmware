@@ -9,12 +9,14 @@ status = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(status)
 
 
-def frame(sequence=2, ambient=25000):
-    words = [0] * 32
-    words[0:5] = [0x54454331, sequence, 1, 1000, 1]
+def frame(sequence=2, ambient=25000, schema=1):
+    words = [0] * (40 if schema == 2 else 32)
+    words[0:5] = [0x54454331, sequence, schema, 1000, 1]
     words[8:12] = [ambient, 50000, 13852, 16852]
     words[12] = 0x80000000
-    return struct.pack("<32I", *words)
+    if schema == 2:
+        words[32:40] = [1, 3500, 0, 0, 0, 0, 17, 5]
+    return struct.pack(f"<{len(words)}I", *words)
 
 
 class StatusTest(unittest.TestCase):
@@ -30,6 +32,22 @@ class StatusTest(unittest.TestCase):
         first = frame(2, 25000)
         second = frame(2, 99000)  # writer began after second's sequence read
         self.assertEqual(status.consistent_snapshot(first, second)["ambient_c"], 25.0)
+
+    def test_schema_two_mode_settings_and_rejected_command(self):
+        result = status.decode(frame(schema=2))
+        self.assertEqual(result["mode"], 1)
+        self.assertEqual(result["mode_name"], "unregulated")
+        self.assertEqual(result["margin_c"], 3.5)
+        self.assertEqual(result["armed_mask"], 0)
+        self.assertEqual(result["desired_duty"], [0, 0, 0])
+        self.assertEqual(result["command_ack_seq"], 17)
+        self.assertEqual(result["command_result_name"], "BENCH_LOCKED")
+        with self.assertRaises(ValueError):
+            status.decode(frame(schema=2)[:128])
+
+    def test_schema_two_seqlock_uses_first_payload(self):
+        self.assertEqual(status.consistent_snapshot(frame(2, 25000, 2),
+                                                   frame(2, 99000, 2))["ambient_c"], 25)
 
     def test_reject_publication_in_progress(self):
         with self.assertRaises(ValueError):

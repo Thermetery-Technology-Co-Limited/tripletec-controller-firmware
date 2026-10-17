@@ -24,7 +24,13 @@ static bool config_valid(const tec_config_t *c)
         isfinite(c->kp) && c->kp >= 0.0f &&
         isfinite(c->ki) && c->ki >= 0.0f &&
         isfinite(c->max_duty) && c->max_duty > 0.0f && c->max_duty <= 1.0f &&
-        isfinite(c->rise_per_second) && c->rise_per_second > 0.0f;
+        isfinite(c->rise_per_second) && c->rise_per_second > 0.0f &&
+        isfinite(c->current_limit_a[0]) && c->current_limit_a[0] >= 0.0f &&
+        c->current_limit_a[0] <= 50.0f &&
+        isfinite(c->current_limit_a[1]) && c->current_limit_a[1] >= 0.0f &&
+        c->current_limit_a[1] <= 10.0f &&
+        isfinite(c->current_limit_a[2]) && c->current_limit_a[2] >= 0.0f &&
+        c->current_limit_a[2] <= 10.0f;
 }
 
 static float clamp(float v, float lo, float hi)
@@ -52,7 +58,8 @@ void tec_config_defaults(tec_config_t *c)
         .kp = 0.10f,
         .ki = 0.02f,
         .max_duty = 0.50f,
-        .rise_per_second = 0.10f
+        .rise_per_second = 0.10f,
+        .current_limit_a = {0.0f, 0.0f, 0.0f}
     };
 }
 
@@ -66,6 +73,7 @@ bool tec_controller_init(tec_controller_t *c, const tec_config_t *config)
         return false;
     }
     c->config = *config;
+    c->mode = TEC_MODE_REGULATED;
     c->configuration_valid = true;
     return true;
 }
@@ -77,12 +85,33 @@ bool tec_controller_set_armed(tec_controller_t *c, size_t channel, bool armed)
         return false;
     }
     s = &c->channel[channel];
-    s->armed = armed;
+    s->armed = false;
     s->duty = 0.0f;
     s->integral = 0.0f;
     s->guard_wait = true;
+    if (armed && (c->config.current_limit_a[channel] <= 0.0f ||
+        (c->mode != TEC_MODE_REGULATED && c->mode != TEC_MODE_UNREGULATED))) {
+        return false;
+    }
+    s->armed = armed;
     if (armed) {
         s->latched_faults = TEC_FAULT_NONE;
+    }
+    return true;
+}
+
+bool tec_controller_set_mode(tec_controller_t *c, tec_mode_t mode)
+{
+    size_t i;
+    if (c == NULL || !c->configuration_valid ||
+        (mode != TEC_MODE_REGULATED && mode != TEC_MODE_UNREGULATED)) {
+        return false;
+    }
+    if (c->mode != mode) {
+        for (i = 0U; i < TEC_CHANNEL_COUNT; ++i) {
+            (void)tec_controller_set_armed(c, i, false);
+        }
+        c->mode = mode;
     }
     return true;
 }
@@ -129,7 +158,8 @@ void tec_controller_step(tec_controller_t *c, const tec_inputs_t *in,
         }
         return;
     }
-    if (!c->configuration_valid) {
+    if (!c->configuration_valid ||
+        (c->mode != TEC_MODE_REGULATED && c->mode != TEC_MODE_UNREGULATED)) {
         common_faults |= TEC_FAULT_CONFIGURATION;
     }
     if (c->have_last_step && c->configuration_valid) {
@@ -151,7 +181,11 @@ void tec_controller_step(tec_controller_t *c, const tec_inputs_t *in,
         if (!in->ambient_valid || !isfinite(in->ambient_c) ||
             in->ambient_c < c->config.ambient_min_c ||
             in->ambient_c > c->config.ambient_max_c ||
-            !tec_dewpoint_c(in->ambient_c, in->rh_percent, &dewpoint)) {
+            !isfinite(in->rh_percent) || in->rh_percent < 0.0f || in->rh_percent > 100.0f) {
+            common_faults |= TEC_FAULT_AMBIENT_INVALID;
+        }
+        if (!tec_dewpoint_c(in->ambient_c, in->rh_percent, &dewpoint) &&
+            c->mode == TEC_MODE_REGULATED) {
             common_faults |= TEC_FAULT_AMBIENT_INVALID;
         }
         if ((uint32_t)(now_ms - in->ambient_timestamp_ms) >
@@ -159,12 +193,14 @@ void tec_controller_step(tec_controller_t *c, const tec_inputs_t *in,
             common_faults |= TEC_FAULT_AMBIENT_STALE;
         }
         if ((common_faults & (TEC_FAULT_AMBIENT_INVALID | TEC_FAULT_AMBIENT_STALE)) == 0U) {
-            target = fmaxf(dewpoint + c->config.dewpoint_margin_c,
-                           c->config.absolute_min_c);
-            /* An infeasible condensation floor must disable cooling, never be
-             * clamped downward to an unsafe target. */
-            if (!isfinite(target) || target > c->config.plate_max_c) {
-                common_faults |= TEC_FAULT_TARGET_RANGE;
+            if (c->mode == TEC_MODE_REGULATED) {
+                target = fmaxf(dewpoint + c->config.dewpoint_margin_c,
+                               c->config.absolute_min_c);
+                /* An infeasible condensation floor must disable cooling, never
+                 * be clamped downward to an unsafe regulated target. */
+                if (!isfinite(target) || target > c->config.plate_max_c) {
+                    common_faults |= TEC_FAULT_TARGET_RANGE;
+                }
             }
             out->dewpoint_c = dewpoint;
             out->target_c = target;
@@ -182,17 +218,50 @@ void tec_controller_step(tec_controller_t *c, const tec_inputs_t *in,
         if (in == NULL || !in->plate[i].valid ||
             !isfinite(in->plate[i].temperature_c) ||
             (c->configuration_valid &&
-             (in->plate[i].temperature_c < c->config.plate_min_c ||
-              in->plate[i].temperature_c > c->config.plate_max_c))) {
+             (in->plate[i].temperature_c <= c->config.plate_min_c ||
+              in->plate[i].temperature_c >= c->config.plate_max_c))) {
             faults |= TEC_FAULT_PLATE_INVALID;
         }
         if (in != NULL && c->configuration_valid &&
             (uint32_t)(now_ms - in->plate[i].timestamp_ms) > c->config.sample_timeout_ms) {
             faults |= TEC_FAULT_PLATE_STALE;
         }
+        if (c->configuration_valid && c->config.current_limit_a[i] <= 0.0f) {
+            faults |= TEC_FAULT_CURRENT_UNCOMMISSIONED;
+        }
+        if (in == NULL || !in->current[i].valid || !isfinite(in->current[i].amperes)) {
+            faults |= TEC_FAULT_CURRENT_INVALID;
+        }
+        if (in == NULL || !in->current[i].calibrated) {
+            faults |= TEC_FAULT_CURRENT_UNVERIFIED;
+        }
+        if (in != NULL && c->configuration_valid) {
+            if ((uint32_t)(now_ms - in->current[i].timestamp_ms) >
+                c->config.sample_timeout_ms) {
+                faults |= TEC_FAULT_CURRENT_STALE;
+            }
+            if (c->config.current_limit_a[i] > 0.0f && isfinite(in->current[i].amperes) &&
+                fabsf(in->current[i].amperes) > c->config.current_limit_a[i]) {
+                faults |= TEC_FAULT_CURRENT_OVERLIMIT;
+            }
+        }
         if (faults != TEC_FAULT_NONE || !s->armed) {
             stop_channel(s, faults);
             copy_channel_output(s, o, faults);
+            continue;
+        }
+        if (c->mode == TEC_MODE_UNREGULATED) {
+            rise_limit = s->duty + c->config.rise_per_second * dt;
+            if (!isfinite(rise_limit)) {
+                faults |= TEC_FAULT_ARITHMETIC;
+                stop_channel(s, faults);
+                copy_channel_output(s, o, faults);
+                continue;
+            }
+            s->integral = 0.0f;
+            s->guard_wait = false;
+            s->duty = fminf(1.0f, rise_limit);
+            copy_channel_output(s, o, TEC_FAULT_NONE);
             continue;
         }
         /* Guard uses the current unfiltered plate sample. Reaching the normal

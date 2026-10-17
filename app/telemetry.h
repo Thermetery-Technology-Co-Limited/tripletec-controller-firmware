@@ -28,9 +28,16 @@ typedef struct {
     uint32_t active_faults[3];
     uint32_t loop_count;
     uint32_t button_pressed;
+    /* Schema 2 appends these words; schema 1's first 128 bytes are stable. */
+    uint32_t mode; /* 0 regulated, 1 unregulated */
+    int32_t margin_mc;
+    uint32_t armed_mask;
+    uint32_t desired_duty_milli[3];
+    uint32_t command_ack_seq;
+    uint32_t command_result;
 } bench_telemetry_t;
 
-_Static_assert(sizeof(bench_telemetry_t) == 128U, "telemetry schema changed");
+_Static_assert(sizeof(bench_telemetry_t) == 160U, "telemetry schema changed");
 extern volatile bench_telemetry_t g_telemetry;
 
 #endif

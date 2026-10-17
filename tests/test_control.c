@@ -7,6 +7,15 @@
 #include <stdio.h>
 #include <string.h>
 
+static void commissioned_config(tec_config_t *config)
+{
+    size_t i;
+    tec_config_defaults(config);
+    for (i = 0U; i < TEC_CHANNEL_COUNT; ++i) {
+        config->current_limit_a[i] = 5.0f;
+    }
+}
+
 static tec_inputs_t good_inputs(uint32_t now)
 {
     tec_inputs_t in;
@@ -21,6 +30,10 @@ static tec_inputs_t good_inputs(uint32_t now)
         in.plate[i].temperature_c = 30.0f;
         in.plate[i].valid = true;
         in.plate[i].timestamp_ms = now;
+        in.current[i].amperes = 1.0f;
+        in.current[i].valid = true;
+        in.current[i].calibrated = true;
+        in.current[i].timestamp_ms = now;
     }
     return in;
 }
@@ -31,6 +44,7 @@ static void freshen(tec_inputs_t *in, uint32_t now)
     in->ambient_timestamp_ms = now;
     for (i = 0U; i < TEC_CHANNEL_COUNT; ++i) {
         in->plate[i].timestamp_ms = now;
+        in->current[i].timestamp_ms = now;
     }
 }
 
@@ -56,7 +70,7 @@ static void missing_hardware_and_explicit_arming(void)
     tec_config_t cfg;
     tec_inputs_t in;
     tec_outputs_t out;
-    tec_config_defaults(&cfg);
+    commissioned_config(&cfg);
     assert(cfg.dewpoint_margin_c == 3.0f && cfg.absolute_min_c == 0.0f);
     assert(tec_controller_init(&c, &cfg));
     memset(&in, 0, sizeof(in));
@@ -90,7 +104,7 @@ static void independent_plate_fault_and_latch(void)
     tec_config_t cfg;
     tec_inputs_t in = good_inputs(0U);
     tec_outputs_t out;
-    tec_config_defaults(&cfg);
+    commissioned_config(&cfg);
     assert(tec_controller_init(&c, &cfg));
     tec_controller_step(&c, &in, 0U, &out);
     arm_all(&c);
@@ -120,7 +134,7 @@ static void invalid_and_stale_samples(void)
     tec_inputs_t in;
     tec_outputs_t out;
     size_t i;
-    tec_config_defaults(&cfg);
+    commissioned_config(&cfg);
     cfg.sample_timeout_ms = 150U;
     for (i = 0U; i < sizeof(bad_rh) / sizeof(bad_rh[0]); ++i) {
         assert(tec_controller_init(&c, &cfg));
@@ -173,7 +187,7 @@ static void guard_humidity_jump_and_absolute_floor(void)
     tec_config_t cfg;
     tec_inputs_t in = good_inputs(0U);
     tec_outputs_t out;
-    tec_config_defaults(&cfg);
+    commissioned_config(&cfg);
     cfg.rise_per_second = 10.0f;
     assert(tec_controller_init(&c, &cfg));
     tec_controller_step(&c, &in, 0U, &out);
@@ -218,7 +232,7 @@ static void slew_ceiling_and_antiwindup(void)
     tec_outputs_t out;
     unsigned n;
     float previous = 0.0f;
-    tec_config_defaults(&cfg);
+    commissioned_config(&cfg);
     assert(tec_controller_init(&c, &cfg));
     tec_controller_step(&c, &in, 0U, &out);
     arm_all(&c);
@@ -246,7 +260,7 @@ static void time_wrap_and_long_gap(void)
     tec_config_t cfg;
     tec_inputs_t in = good_inputs(UINT32_MAX - 49U);
     tec_outputs_t out;
-    tec_config_defaults(&cfg);
+    commissioned_config(&cfg);
     assert(tec_controller_init(&c, &cfg));
     arm_all(&c);
     tec_controller_step(&c, &in, UINT32_MAX - 49U, &out);
@@ -274,7 +288,7 @@ static void impossible_target_and_bad_configuration(void)
     tec_config_t cfg;
     tec_inputs_t in = good_inputs(0U);
     tec_outputs_t out;
-    tec_config_defaults(&cfg);
+    commissioned_config(&cfg);
     cfg.plate_max_c = 20.0f;
     assert(tec_controller_init(&c, &cfg));
     in.ambient_c = 30.0f;
@@ -285,20 +299,20 @@ static void impossible_target_and_bad_configuration(void)
     assert_off(&out);
     assert(out.target_c == 33.0f);
     assert(out.channel[0].latched_faults & TEC_FAULT_TARGET_RANGE);
-    tec_config_defaults(&cfg);
+    commissioned_config(&cfg);
     cfg.max_duty = NAN;
     assert(!tec_controller_init(&c, &cfg));
     assert(!tec_controller_set_armed(&c, 0U, true));
     tec_controller_step(&c, &in, 100U, &out);
     assert_off(&out);
     assert(out.channel[0].active_faults & TEC_FAULT_CONFIGURATION);
-    tec_config_defaults(&cfg);
+    commissioned_config(&cfg);
     cfg.dewpoint_margin_c = 0.0f;
     assert(!tec_controller_init(&c, &cfg));
-    tec_config_defaults(&cfg);
+    commissioned_config(&cfg);
     cfg.absolute_min_c = -1.0f;
     assert(!tec_controller_init(&c, &cfg));
-    tec_config_defaults(&cfg);
+    commissioned_config(&cfg);
     cfg.kp = FLT_MAX;
     assert(tec_controller_init(&c, &cfg));
     in = good_inputs(0U);

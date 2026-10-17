@@ -1,6 +1,7 @@
 #include "board.h"
 #include "controller.h"
 #include "telemetry.h"
+#include "control_protocol.h"
 #include "sht31.h"
 #include "ads1220.h"
 #include "ntc.h"
@@ -16,6 +17,10 @@
 #endif
 
 volatile bench_telemetry_t g_telemetry;
+volatile control_mailbox_t g_command_mailbox = {
+    .magic = CONTROL_MAILBOX_MAGIC, .version = CONTROL_PROTOCOL_VERSION
+};
+static control_protocol_t command_protocol;
 static tec_controller_t controller;
 static tec_inputs_t inputs;
 static tec_outputs_t outputs;
@@ -73,7 +78,7 @@ static void publish(uint32_t now)
     const uint32_t sequence = g_telemetry.seq;
     next.magic = UINT32_C(0x54454331);
     next.seq = sequence + 1U;
-    next.schema = 1U;
+    next.schema = 2U;
     next.uptime_ms = now;
     next.outputs_locked = 1U;
     next.sht_errors = sht_errors;
@@ -96,6 +101,10 @@ static void publish(uint32_t now)
         next.current_ma[i] = current_valid ? milli(current_amperes[i]) : INT32_MIN;
         next.applied_duty_milli[i] = 0U;
         next.active_faults[i] = outputs.channel[i].active_faults;
+        next.desired_duty_milli[i] = (uint32_t)milli(outputs.channel[i].duty);
+        if (controller.channel[i].armed) {
+            next.armed_mask |= 1U << i;
+        }
         if (fresh) {
             next.valid_flags |= 1U << (i + 2U);
         }
@@ -105,6 +114,10 @@ static void publish(uint32_t now)
     }
     next.loop_count = loop_count;
     next.button_pressed = board_button_pressed() ? 1U : 0U;
+    next.mode = (uint32_t)controller.mode;
+    next.margin_mc = milli(controller.config.dewpoint_margin_c);
+    next.command_ack_seq = command_protocol.ack_seq;
+    next.command_result = (uint32_t)command_protocol.result;
     g_telemetry.seq = sequence + 1U;
     __asm volatile("dmb" ::: "memory");
     g_telemetry = next;
@@ -112,11 +125,56 @@ static void publish(uint32_t now)
     g_telemetry.seq = sequence + 2U;
 }
 
+static void disarm_all(void)
+{
+    for (size_t i = 0U; i < TEC_CHANNEL_COUNT; ++i) {
+        (void)tec_controller_set_armed(&controller, i, false);
+    }
+    board_outputs_force_off();
+}
+
+static control_result_t apply_command(void *context, uint32_t opcode,
+                                       int32_t value, uint32_t now_ms)
+{
+    (void)context;
+    (void)now_ms;
+    switch (opcode) {
+    case CONTROL_STOP:
+        disarm_all();
+        return CONTROL_OK;
+    case CONTROL_HEARTBEAT:
+        return CONTROL_OK;
+    case CONTROL_SET_MODE:
+        disarm_all();
+        return tec_controller_set_mode(&controller, (tec_mode_t)value) ?
+               CONTROL_OK : CONTROL_INTERLOCK;
+    case CONTROL_SET_MARGIN: {
+        tec_config_t config = controller.config;
+        const tec_mode_t mode = controller.mode;
+        config.dewpoint_margin_c = (float)value / 1000.0f;
+        disarm_all();
+        if (!tec_controller_init(&controller, &config) ||
+            !tec_controller_set_mode(&controller, mode)) {
+            return CONTROL_INTERLOCK;
+        }
+        return CONTROL_OK;
+    }
+    case CONTROL_ARM:
+        /* This image has no output-enable path. Future commissioned builds
+         * additionally need current, wiring, fresh-sensor and host-link gates.
+         */
+        disarm_all();
+        return CONTROL_BENCH_LOCKED;
+    default:
+        return CONTROL_BAD_OPCODE;
+    }
+}
+
 static void print_status(void)
 {
     char text[256];
     (void)snprintf(text, sizeof(text),
-        "TEC-BENCH v1 up=%lu lock=1 ambient_mC=%ld RH_mPct=%ld dew_mC=%ld target_mC=%ld "
+        "TEC-BENCH v2 up=%lu lock=1 ambient_mC=%ld RH_mPct=%ld dew_mC=%ld target_mC=%ld "
         "plate_mC=%ld,%ld,%ld valid=0x%lx sht_err=%lu ads_err=%lu PWM=0,0,0\r\n",
         (unsigned long)g_telemetry.uptime_ms, (long)g_telemetry.ambient_mc,
         (long)g_telemetry.rh_mpercent, (long)g_telemetry.dewpoint_mc,
@@ -160,6 +218,7 @@ int main(void)
     board_init();
     tec_config_defaults(&config);
     (void)tec_controller_init(&controller, &config);
+    control_protocol_init(&command_protocol);
     inputs.hardware_verified = false; /* No runtime command can remove bench lock. */
     (void)sht31_init(&sht, &sht_bus, 0x44U);
     (void)ads1220_init(&ads, &ads_bus);
@@ -229,17 +288,47 @@ int main(void)
         now = board_millis();
         if (now - last_current >= 250U) {
             last_current = now;
-            current_valid = board_current_read_raw(current_codes, 25U);
+            const bool adc_valid = board_current_read_raw(current_codes, 25U);
+            current_valid = adc_valid;
             for (size_t i = 0U; i < 3U; ++i) {
                 current_result_t current;
-                if (current_valid && current_from_adc12(current_codes[i], 3.3f,
+                if (adc_valid && current_from_adc12(current_codes[i], 3.3f,
                                                          &current_config[i], &current)) {
                     current_amperes[i] = current.amperes;
+                    inputs.current[i].amperes = current.amperes;
+                    inputs.current[i].valid = current.within_nominal_range;
+                    inputs.current[i].calibrated = !current.nominal_only;
+                    inputs.current[i].timestamp_ms = now;
                 } else {
                     current_valid = false;
                     current_amperes[i] = NAN;
+                    inputs.current[i].valid = false;
+                    inputs.current[i].calibrated = false;
                 }
             }
+        }
+        if (control_protocol_poll(&command_protocol, &g_command_mailbox,
+                                   apply_command, NULL, now)) {
+            tec_controller_step(&controller, &inputs, now, &outputs);
+            publish(now); /* ACK describes applied state, never just receipt. */
+            last_control = now;
+            last_publish = now;
+        }
+        /* A future commissioned output build must keep receiving validated
+         * protocol packets while armed. A read alone does not extend the lease.
+         * CRC detects torn writes; this local debug link provides no identity
+         * authentication. The bench image still rejects every ARM request.
+         */
+        bool any_armed = false;
+        for (size_t i = 0U; i < TEC_CHANNEL_COUNT; ++i) {
+            any_armed |= controller.channel[i].armed;
+        }
+        if (control_protocol_lease_expired(&command_protocol, any_armed, now, 2000U)) {
+            disarm_all();
+            tec_controller_step(&controller, &inputs, now, &outputs);
+            publish(now);
+            last_control = now;
+            last_publish = now;
         }
         if (now - last_control >= 50U) {
             last_control = now;

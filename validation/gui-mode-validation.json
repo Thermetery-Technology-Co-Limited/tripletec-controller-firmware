@@ -1,0 +1,231 @@
+{
+  "initial": {
+    "schema": 2,
+    "sequence": 164,
+    "uptime_ms": 20250,
+    "outputs_locked_off": true,
+    "valid_flags": 35,
+    "sht31_errors": 0,
+    "ads1220_errors": 0,
+    "ambient_c": 25.865,
+    "rh_percent": 61.317,
+    "dewpoint_c": 17.85,
+    "target_c": 20.85,
+    "plate_c": [
+      null,
+      null,
+      null
+    ],
+    "ntc_adc_raw": [
+      6745450,
+      6745500,
+      6745431
+    ],
+    "current_adc_raw": [
+      2043,
+      377,
+      396
+    ],
+    "current_a_nominal": [
+      -0.137,
+      -0.099,
+      -0.041
+    ],
+    "applied_duty": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "active_faults": [
+      6194,
+      6194,
+      6194
+    ],
+    "loop_count": 19686,
+    "button_pressed": false,
+    "mode": 0,
+    "mode_name": "regulated",
+    "margin_c": 3.0,
+    "armed_mask": 0,
+    "desired_duty": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "command_ack_seq": 0,
+    "command_result": 0,
+    "command_result_name": "OK"
+  },
+  "unregulated": {
+    "schema": 2,
+    "sequence": 166,
+    "uptime_ms": 20468,
+    "outputs_locked_off": true,
+    "valid_flags": 35,
+    "sht31_errors": 0,
+    "ads1220_errors": 0,
+    "ambient_c": 25.865,
+    "rh_percent": 61.317,
+    "dewpoint_c": 17.85,
+    "target_c": null,
+    "plate_c": [
+      null,
+      null,
+      null
+    ],
+    "ntc_adc_raw": [
+      6745269,
+      6745328,
+      6745342
+    ],
+    "current_adc_raw": [
+      2043,
+      377,
+      396
+    ],
+    "current_a_nominal": [
+      -0.137,
+      -0.099,
+      -0.041
+    ],
+    "applied_duty": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "active_faults": [
+      6194,
+      6706,
+      6706
+    ],
+    "loop_count": 19903,
+    "button_pressed": false,
+    "mode": 1,
+    "mode_name": "unregulated",
+    "margin_c": 3.0,
+    "armed_mask": 0,
+    "desired_duty": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "command_ack_seq": 1,
+    "command_result": 0,
+    "command_result_name": "OK"
+  },
+  "arm_rejection": "Controller rejected arm: BENCH_LOCKED",
+  "regulated_margin_4_5": {
+    "schema": 2,
+    "sequence": 174,
+    "uptime_ms": 21322,
+    "outputs_locked_off": true,
+    "valid_flags": 35,
+    "sht31_errors": 0,
+    "ads1220_errors": 0,
+    "ambient_c": 25.838,
+    "rh_percent": 61.324,
+    "dewpoint_c": 17.827,
+    "target_c": 22.327,
+    "plate_c": [
+      null,
+      null,
+      null
+    ],
+    "ntc_adc_raw": [
+      6745346,
+      6745421,
+      6745323
+    ],
+    "current_adc_raw": [
+      2043,
+      383,
+      429
+    ],
+    "current_a_nominal": [
+      -0.137,
+      -0.081,
+      0.06
+    ],
+    "applied_duty": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "active_faults": [
+      6194,
+      6706,
+      6194
+    ],
+    "loop_count": 20729,
+    "button_pressed": false,
+    "mode": 0,
+    "mode_name": "regulated",
+    "margin_c": 4.5,
+    "armed_mask": 0,
+    "desired_duty": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "command_ack_seq": 5,
+    "command_result": 0,
+    "command_result_name": "OK"
+  },
+  "restored": {
+    "schema": 2,
+    "sequence": 180,
+    "uptime_ms": 21953,
+    "outputs_locked_off": true,
+    "valid_flags": 35,
+    "sht31_errors": 0,
+    "ads1220_errors": 0,
+    "ambient_c": 25.865,
+    "rh_percent": 61.34,
+    "dewpoint_c": 17.856,
+    "target_c": 20.856,
+    "plate_c": [
+      null,
+      null,
+      null
+    ],
+    "ntc_adc_raw": [
+      6745427,
+      6745384,
+      6745376
+    ],
+    "current_adc_raw": [
+      2041,
+      425,
+      423
+    ],
+    "current_a_nominal": [
+      -0.198,
+      0.047,
+      0.041
+    ],
+    "applied_duty": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "active_faults": [
+      6194,
+      6194,
+      6194
+    ],
+    "loop_count": 21355,
+    "button_pressed": false,
+    "mode": 0,
+    "mode_name": "regulated",
+    "margin_c": 3.0,
+    "armed_mask": 0,
+    "desired_duty": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "command_ack_seq": 8,
+    "command_result": 0,
+    "command_result_name": "OK"
+  }
+}

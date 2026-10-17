@@ -1,6 +1,29 @@
 # TripleTECDriver firmware
 
-First-stage firmware for the STM32F103RCT6 cooler controller. The selected operating rule is **target = max(0°C, dew point + 3°C)**. This bench image measures and reports sensors while holding all three TEC control pins LOW. It cannot enable the power stage, even through UART commands.
+Firmware and a desktop GUI for the STM32F103RCT6 cooler controller. Regulated mode uses **target = max(0°C, dew point + 3°C)** by default. Unregulated mode requests maximum cooling and deliberately bypasses the dew-point target. The current bench image measures and reports sensors while holding all three TEC control pins LOW; selecting a mode cannot enable the power stage.
+
+## Desktop GUI
+
+```powershell
+python -m gui --connect
+```
+
+The dashboard shows ambient temperature/RH, dew point, regulated target, plate temperatures, nominal currents, and requested versus applied duty. Select **Regulated** or **Unregulated (100%)**, then apply the setting. Changing modes disarms all channels. The margin is adjustable from 0.5°C to 20°C in regulated mode. **Stop** is always available while connected; **Start** is disabled by the firmware's bench output lock.
+
+Unregulated mode bypasses condensation protection and the regulated 0°C target floor. With commissioned hardware it ramps toward 100% duty without PI regulation; fresh sensor readings, valid calibrated currents, commissioned per-channel current limits, hardware verification, and operating-temperature limits still apply. It can cause condensation. The current bench firmware cannot energize TECs in either mode.
+
+`python -m gui --demo` runs an explicitly labeled simulation without touching hardware. Live monitoring and commands use the existing Pico SWD connection; no UART wiring is required. The GUI waits for firmware acknowledgement before showing a change as applied, and keeps hardware work outside the UI thread.
+
+To build a Windows executable with Python/Tk bundled:
+
+```powershell
+python scripts/build.py all
+python scripts/package_gui.py
+```
+
+Launch `build/gui/TripleTEC-Control.exe`. OpenOCD must be installed and available on PATH. The executable includes the matching firmware symbol metadata; rebuild it after changing the firmware memory layout. `--smoke-test` checks the window can be created and closed without hardware access.
+
+Use one host process per Pico probe. Close the GUI before flashing or running the diagnostic CLI. `python scripts/check_gui_link.py` performs an output-locked command check and restores regulated mode with a 3°C margin. Test evidence is recorded in [VALIDATION_GUI.md](VALIDATION_GUI.md).
 
 ## Build and test
 
@@ -19,14 +42,15 @@ The image is `build/stm32/tripletec-bench.elf`, with matching `.bin`, `.hex`, ma
 
 ## What is implemented
 
-- Three-channel dew-point controller, independent of the hardware drivers, with a configurable margin initialized to 3°C.
+- Three-channel controller, independent of the hardware drivers, with regulated and unregulated modes and a configurable margin initialized to 3°C.
 - Magnus dew point over the liquid-water curve. Rejects RH outside `(0,100]`, nonfinite inputs, and ambient/dew-point values outside −45…60°C. A 0°C target floor is retained until frost protection is developed.
 - PI demand, a 50% provisional duty cap, upward slew limiting, immediate reductions, anti-windup, and a 0.2°C restart hysteresis. Gains and limits are placeholders for powered commissioning.
-- Explicit per-channel arming and a separate hardware-verified gate. Sensor, freshness, configuration, timing, and arithmetic faults stop and disarm affected channels. Recovery does not automatically rearm them. Reaching the target is a normal, automatically recovering cooling inhibit.
+- Explicit per-channel arming and a separate hardware-verified gate. Sensor, freshness, configuration, timing, arithmetic and current faults stop and disarm affected channels. Current limits default to zero (uncommissioned), so arming is refused until limits are set and measurements are calibrated. Recovery does not automatically rearm channels. Reaching the regulated target is a normal, automatically recovering cooling inhibit.
 - SHT31 I²C measurement with both CRC checks and bounded bus operations.
 - ADS1220 SPI configuration/readback verification and three-channel single-shot acquisition, with signed 24-bit decoding and DRDY timeout handling.
 - Nominal 100kΩ/B3950 thermistor conversion, open/short/range detection, and nominal per-channel ACS725 current conversion.
 - Safe pin initialization before C runtime startup, watchdog, fault handler, and read-only live telemetry through the existing Pico SWD connection.
+- A CRC-checked RAM command mailbox with sequence/acknowledgement handling for mode, margin, stop, arm and heartbeat commands. The bench image accepts settings but rejects arm commands. A two-second host lease disarms any future enabled channels after loss of communication.
 
 The bench application always sets `hardware_verified=false`, never arms the controller, never configures PWM alternate-function outputs, and repeatedly forces PA1/PA2/PA3 LOW. The control library is exercised with simulated inputs in native tests; simulated measurements are never substituted into live board readings.
 
@@ -61,7 +85,7 @@ Telemetry `valid_flags`: bit 0 fresh ambient sample; bit 1 verified ADS configur
 
 ## Limits before powered operation
 
-This stage cannot establish TEC polarity, cooling power, current limits, heatsink capacity, thermal lag, or loop gains. There is no commissioned overcurrent shutdown or power-stage PWM driver yet. Current values and thermistor temperatures use nominal 3.3V and component constants; measure AVCC, current zero offsets, resistor ratios, and the actual thermistor R–T characteristics before claiming temperature accuracy. The thermistor range note on the drawing does not exactly match a nominal B3950 curve.
+This stage cannot establish TEC polarity, cooling power, current limits, heatsink capacity, thermal lag, or loop gains. Software current trips are implemented and tested, but the actual current shutdown and PWM power stage are not commissioned. Current values and thermistor temperatures use nominal 3.3V and component constants; measure AVCC, current zero offsets, resistor ratios, and the actual thermistor R–T characteristics before claiming temperature accuracy. The thermistor range note on the drawing does not exactly match a nominal B3950 curve.
 
 The 3°C offset is the requested initial setting, not a validated condensation guarantee. Sensor placement, accuracy, gradients, and thermal inertia must be measured. Turning cooling off does not actively warm an already cold plate. Final powered tests must verify undershoot and humidity-step behavior before removing the output lock.
 

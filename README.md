@@ -4,7 +4,7 @@ First-stage firmware for the STM32F103RCT6 cooler controller. The selected opera
 
 ## Build and test
 
-Python 3 and `arm-none-eabi-gcc` are required. Native C tests also require a host GCC. A portable GCC is installed locally at `C:\Users\Administrator\tools\w64devkit\bin\gcc.exe`; the ARM toolchain is already on PATH.
+Python 3 and `arm-none-eabi-gcc` are required. Native C tests also require a host GCC, such as MinGW-w64 on Windows. Put the compilers on PATH or provide their paths with `--cc` and `--arm-cc`.
 
 From this directory:
 
@@ -51,7 +51,7 @@ The output stage is a low-side NMOS switch per channel, supporting cooling in th
 
 ## Diagnostics
 
-`scripts/read_status.py` uses generic OpenOCD MEM-AP reads, without a CPU halt/reset. It validates a sequence counter to reject torn snapshots, then reports JSON. It requires the ELF/symbol file matching the programmed firmware. `--output path.json` saves a measurement. It defaults to Pico serial `E66598541B21AE38`; override with `--serial` when using another probe.
+`scripts/read_status.py` uses generic OpenOCD MEM-AP reads, without a CPU halt/reset. It validates a sequence counter to reject torn snapshots, then reports JSON. It requires the ELF/symbol file matching the programmed firmware. `--output path.json` saves a measurement. OpenOCD selects an attached CMSIS-DAP probe; use `--serial` to select a specific probe when needed.
 
 UART prints status every second and accepts `status` and `help`. Missing values use `INT32_MIN`; temperatures are printed in milli-degrees, RH in milli-percent. Pico's COM3 belongs to the probe UART bridge: MCU USART1 data only reaches it if the Pico UART pins are actually wired to the MCU header. SWD telemetry requires no UART wiring.
 
@@ -67,10 +67,14 @@ The 3°C offset is the requested initial setting, not a validated condensation g
 
 ## Source references
 
-- Design originals: `../hardware/SCH_TripleTECDriver_MCU_2026-10-17.pdf` and the matching Power PDF.
+- Design originals are retained separately from this firmware repository: `SCH_TripleTECDriver_MCU_2026-10-17.pdf` and `SCH_TripleTECDriver_Power_2026-10-17.pdf`. In the original local workspace they are in the sibling `hardware/` directory.
 - [Sensirion humidity equations, Table 1 and Eq. 12](https://sensirion.com/en/media/documents/8AB2AD38/61642ADD/Sensirion_AppNotes_Humidity_Sensors_Introduction_to_Relative_Humidit.pdf).
 - [SHT3x-DIS datasheet](https://sensirion.com/media/documents/213E6A3B/63A5A569/Datasheet_SHT3x_DIS.pdf).
 - [TI ADS1220 datasheet](https://www.ti.com/lit/ds/symlink/ads1220.pdf).
 - [Allegro ACS725 datasheet](https://www.allegromicro.com/-/media/files/datasheets/acs725-datasheet.pdf).
 - [ST RM0008](https://www.st.com/resource/en/reference_manual/rm0008-stm32f101xx-stm32f102xx-stm32f103xx-stm32f105xx-and-stm32f107xx-advanced-armbased-32bit-mcus-stmicroelectronics.pdf) and [high-density device errata ES0340](https://www.st.com/resource/en/errata_sheet/cd00197763-stm32f101xcde-and-stm32f103xcde-highdensity-device-limitations-stmicroelectronics.pdf).
+
+## Copyright
+
+Copyright (c) 2026 Thermetery Technology Co., Limited 賽摩泰科技（中國香港）有限公司. All rights reserved. See [COPYRIGHT](COPYRIGHT).
 

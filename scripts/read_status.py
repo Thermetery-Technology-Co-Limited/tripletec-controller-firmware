@@ -52,7 +52,7 @@ def consistent_snapshot(first: bytes, second: bytes) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--serial", default="E66598541B21AE38")
+    parser.add_argument("--serial", help="Select a specific CMSIS-DAP probe by serial number")
     parser.add_argument("--openocd", default=shutil.which("openocd"))
     parser.add_argument("--output", type=Path)
     parser.add_argument("--from-file", type=Path, help="Decode a saved 128-byte snapshot offline")
@@ -65,8 +65,10 @@ def main() -> None:
         symbol = json.loads((ROOT / "build/stm32/telemetry-symbol.json").read_text())
         if symbol["size"] != 128:
             raise SystemExit("Rebuild firmware: unexpected telemetry size")
-        commands = ["cmsis-dap backend usb_bulk", f"adapter serial {args.serial}",
-                    "transport select swd", "adapter speed 1000", "reset_config none",
+        commands = ["cmsis-dap backend usb_bulk"]
+        if args.serial:
+            commands.append(f"adapter serial {args.serial}")
+        commands += ["transport select swd", "adapter speed 1000", "reset_config none",
                     "gdb port disabled", "tcl port disabled", "telnet port disabled",
                     "swd newdap status cpu", "dap create status.dap -chain-position status.cpu",
                     "target create status.mem mem_ap -dap status.dap -ap-num 0", "init", "poll off"]

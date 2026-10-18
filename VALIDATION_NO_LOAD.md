@@ -2,7 +2,7 @@
 
 Version 0.2.1 was programmed and verified through the Pico CMSIS-DAP probe. The operator reports the 8-pin inputs and 10-pin interboard cable connected, with the 12V supply on. No TECs or plate thermistors are attached. Supply presence is operator-provided information; this PCB has no firmware-readable 12V monitor.
 
-Later observations: the current inputs temporarily recovered near nominal zero after the board was moved, then returned near ground with the harness connected and untouched. The fault remains unresolved. See [COMMISSIONING.md](COMMISSIONING.md) and `validation/pre-tec-readiness-2026-10-18.json` for the latest checks and load-rating concerns.
+Later observations: the current inputs temporarily recovered near nominal zero after the board was moved, then returned near ground with the harness reportedly connected and untouched. The operator subsequently found and secured a loose 10-pin connection. The following 60-snapshot check observed restored signals with no near-ground dropouts, though channels 2/3 still need noise investigation. See [COMMISSIONING.md](COMMISSIONING.md), `validation/pre-tec-readiness-2026-10-18.json` and `validation/secured-harness-check-2026-10-18.json` for the observation history and remaining checks.
 
 ## Findings
 

@@ -1,0 +1,261 @@
+{
+  "format": "tripletec-no-load-v1",
+  "created_utc": "2026-10-18T09:02:10.970746+00:00",
+  "sample_count": 60,
+  "requested_samples": 60,
+  "acquisition_ok": true,
+  "acquisition_error": null,
+  "no_load_checks_passed": false,
+  "assumptions": [
+    "No TEC loads attached is operator-provided setup information, not sensed by firmware.",
+    "Current ADC is 12-bit; displayed voltage assumes a nominal 3.3 V ADC reference.",
+    "Nominal ACS725 supply is 3.3 V; zero output is 50% of supply on channel 1 and 10% on channels 2/3.",
+    "Screening bands are diagnostic choices, not datasheet tolerances: near rail <=2% or >=98% ADC span; plausible zero within 2% span of expected; marginal within 5%; unstable span >2%.",
+    "This does not calibrate offsets or sensitivity, verify wiring or current gain, or prove 12 V presence.",
+    "Passing no-load checks does not authorize cooling; output lock and commissioning interlocks remain required."
+  ],
+  "blockers": [
+    "plate_1_missing_or_invalid",
+    "plate_2_missing_or_invalid",
+    "plate_3_missing_or_invalid",
+    "current_2_unstable_zero",
+    "current_3_unstable_zero",
+    "channel_1_firmware_faults",
+    "channel_2_firmware_faults",
+    "channel_3_firmware_faults"
+  ],
+  "progress": {
+    "sequence": {
+      "valid": true,
+      "first": 22726,
+      "last": 23000,
+      "advance": 274,
+      "wraps": 0,
+      "stalls": 0,
+      "backwards_or_reset": 0
+    },
+    "uptime_ms": {
+      "valid": true,
+      "first": 2840171,
+      "last": 2874421,
+      "advance": 34250,
+      "wraps": 0,
+      "stalls": 0,
+      "backwards_or_reset": 0
+    }
+  },
+  "outputs_locked_and_zero": true,
+  "valid_flags_observed": [
+    35
+  ],
+  "plate_sensors": [
+    {
+      "channel": 1,
+      "valid_in_all_samples": false,
+      "last_c": null
+    },
+    {
+      "channel": 2,
+      "valid_in_all_samples": false,
+      "last_c": null
+    },
+    {
+      "channel": 3,
+      "valid_in_all_samples": false,
+      "last_c": null
+    }
+  ],
+  "current_baselines": [
+    {
+      "channel": 1,
+      "expected_zero_raw_nominal": 2047.5,
+      "expected_zero_v_nominal": 1.65,
+      "classification": "plausible_zero",
+      "plausible_zero": true,
+      "raw": {
+        "min": 2037,
+        "mean": 2041.9333333333334,
+        "max": 2047,
+        "span": 10
+      },
+      "voltage_v_nominal": {
+        "min": 1.6415384615384614,
+        "mean": 1.6455140415140415,
+        "max": 1.6495970695970694
+      },
+      "max_deviation_raw": 10.5
+    },
+    {
+      "channel": 2,
+      "expected_zero_raw_nominal": 409.5,
+      "expected_zero_v_nominal": 0.33,
+      "classification": "unstable_zero",
+      "plausible_zero": false,
+      "raw": {
+        "min": 369,
+        "mean": 414.5833333333333,
+        "max": 479,
+        "span": 110
+      },
+      "voltage_v_nominal": {
+        "min": 0.29736263736263735,
+        "mean": 0.334096459096459,
+        "max": 0.38600732600732596
+      },
+      "max_deviation_raw": 69.5
+    },
+    {
+      "channel": 3,
+      "expected_zero_raw_nominal": 409.5,
+      "expected_zero_v_nominal": 0.33,
+      "classification": "unstable_zero",
+      "plausible_zero": false,
+      "raw": {
+        "min": 373,
+        "mean": 415.4166666666667,
+        "max": 455,
+        "span": 82
+      },
+      "voltage_v_nominal": {
+        "min": 0.30058608058608055,
+        "mean": 0.33476800976800974,
+        "max": 0.36666666666666664
+      },
+      "max_deviation_raw": 45.5
+    }
+  ],
+  "sensor_error_counters": {
+    "sht31_errors": {
+      "valid": true,
+      "first": 0,
+      "last": 0,
+      "advance": 0,
+      "wraps": 0,
+      "stalls": 59,
+      "backwards_or_reset": 0
+    },
+    "ads1220_errors": {
+      "valid": true,
+      "first": 0,
+      "last": 0,
+      "advance": 0,
+      "wraps": 0,
+      "stalls": 59,
+      "backwards_or_reset": 0
+    }
+  },
+  "firmware_faults": [
+    {
+      "channel": 1,
+      "valid": true,
+      "observed_masks": [
+        6194
+      ],
+      "observed_names": [
+        "hardware_gate",
+        "plate_invalid",
+        "plate_stale",
+        "current_unverified",
+        "current_uncommissioned"
+      ],
+      "intentional_bench_inhibits": [
+        "hardware_gate",
+        "current_unverified",
+        "current_uncommissioned"
+      ],
+      "other_faults": [
+        "plate_invalid",
+        "plate_stale"
+      ]
+    },
+    {
+      "channel": 2,
+      "valid": true,
+      "observed_masks": [
+        6194,
+        6706
+      ],
+      "observed_names": [
+        "hardware_gate",
+        "plate_invalid",
+        "plate_stale",
+        "current_invalid",
+        "current_unverified",
+        "current_uncommissioned"
+      ],
+      "intentional_bench_inhibits": [
+        "hardware_gate",
+        "current_unverified",
+        "current_uncommissioned"
+      ],
+      "other_faults": [
+        "plate_invalid",
+        "plate_stale",
+        "current_invalid"
+      ]
+    },
+    {
+      "channel": 3,
+      "valid": true,
+      "observed_masks": [
+        6194,
+        6706
+      ],
+      "observed_names": [
+        "hardware_gate",
+        "plate_invalid",
+        "plate_stale",
+        "current_invalid",
+        "current_unverified",
+        "current_uncommissioned"
+      ],
+      "intentional_bench_inhibits": [
+        "hardware_gate",
+        "current_unverified",
+        "current_uncommissioned"
+      ],
+      "other_faults": [
+        "plate_invalid",
+        "plate_stale",
+        "current_invalid"
+      ]
+    }
+  ],
+  "adc_diagnostics": {
+    "available": true,
+    "acquisition_validated": true,
+    "last": {
+      "schema": 1,
+      "sequence": 23000,
+      "uptime_ms": 2874421,
+      "valid": true,
+      "acquisition_ok": true,
+      "reference_plausible": true,
+      "vrefint_adc_raw": 1498,
+      "estimated_vdda_v": 3.28,
+      "adc_errors": 0,
+      "reference_basis": "Nominal 1.20 V VREFINT; estimate only, not calibrated"
+    },
+    "sequence_progress": {
+      "valid": true,
+      "first": 22726,
+      "last": 23000,
+      "advance": 274,
+      "wraps": 0,
+      "stalls": 0,
+      "backwards_or_reset": 0
+    },
+    "adc_error_counter": {
+      "valid": true,
+      "first": 0,
+      "last": 0,
+      "advance": 0,
+      "wraps": 0,
+      "stalls": 59,
+      "backwards_or_reset": 0
+    },
+    "vdda_note": "Estimated VDDA uses a nominal 1.2 V internal reference; it is not a calibrated rail measurement."
+  },
+  "operator_action": "Operator identified loose 10-pin interboard connection, secured it, and reported sensor VCC restored.",
+  "interpretation": "No near-zero dropouts observed during this 60-snapshot window; channels 2/3 still fail the conservative zero-baseline stability screen. Not calibration or output commissioning."
+}

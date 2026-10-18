@@ -35,7 +35,7 @@ python -m scripts.check_no_load --serial E66598541B21AE38 --output validation/po
 
 It collects 12 snapshots, checks telemetry progress, output lock/zero duty, sensor errors, thermistor presence and nominal zero-current baselines. Exit 1 means checks remain; exit 2 means incomplete acquisition. It never changes settings, sends a heartbeat, resets the MCU or enables outputs. Missing thermistors are expected at this assembly stage and are reported as unresolved checks.
 
-The current board has healthy internal-reference readings, but all three external current-sense inputs remain near ground. These are rejected inputs, not zero-current calibration values. The GUI shows unavailable current readings and the missing sensor details. See [VALIDATION_NO_LOAD.md](VALIDATION_NO_LOAD.md) for evidence and the next physical measurements.
+The current board has healthy internal-reference readings. A loose 10-pin connection caused near-ground external current readings; securing it restored nominal zero-current levels throughout a later 60-snapshot check. Channels 2/3 still need noise investigation and stable baselines before calibration. The GUI shows unavailable readings when firmware rejects a sensor input. See [VALIDATION_NO_LOAD.md](VALIDATION_NO_LOAD.md) and [COMMISSIONING.md](COMMISSIONING.md) for evidence and remaining checks.
 
 ## Build and test
 
@@ -99,7 +99,7 @@ An optional, independently sequenced 32-byte ADC diagnostic block reports ADC1 c
 
 ## Limits before powered operation
 
-Follow [COMMISSIONING.md](COMMISSIONING.md) before connecting a TEC. The current-sense supply/signal problem recurred after temporary recovery, and the reported 12V/320W load exceeds the XT60 channels' 10A measurement range if operated at that measured power and voltage. Physical fault isolation and a review of actual load/power-path ratings are required. The output lock remains in place.
+Follow [COMMISSIONING.md](COMMISSIONING.md) before connecting a TEC. The loose harness has been secured and signal recovery observed, but current-sense noise/calibration and thermistor checks remain. The reported 12V/320W load exceeds the XT60 channels' 10A measurement range if operated at that measured power and voltage. A review of actual load/power-path ratings is required. The output lock remains in place.
 
 This stage cannot establish TEC polarity, cooling power, current limits, heatsink capacity, thermal lag, or loop gains. Software current trips are implemented and tested, but the actual current shutdown and PWM power stage are not commissioned. Current values and thermistor temperatures use nominal 3.3V and component constants; measure AVCC, current zero offsets, resistor ratios, and the actual thermistor R–T characteristics before claiming temperature accuracy. The thermistor range note on the drawing does not exactly match a nominal B3950 curve.
 

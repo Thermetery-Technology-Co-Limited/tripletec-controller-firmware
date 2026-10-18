@@ -81,6 +81,23 @@ def consistent_adc_diagnostics(first: bytes, second: bytes) -> dict:
     }
 
 
+def consistent_limit_configuration(first: bytes, second: bytes) -> dict:
+    if len(first) != 32 or len(second) != 32 or first[4:8] != second[4:8]:
+        raise ValueError("Current-limit snapshot changed or is incomplete")
+    words = struct.unpack("<8I", first)
+    if words[0] != 0x5445434C or words[2] != 1 or words[1] & 1:
+        raise ValueError("Current-limit identity or sequence is invalid")
+    if words[4] > 50000 or words[5] > 9000 or words[6] > 9000 or words[7] & ~7:
+        raise ValueError("Current-limit policy is outside supported ranges")
+    if any(words[7] & (1 << index) and words[4 + index] == 0 for index in range(3)):
+        raise ValueError("A commissioned current limit cannot be zero")
+    return {
+        "valid": True, "schema": words[2], "sequence": words[1], "uptime_ms": words[3],
+        "current_limits_a": [value / 1000 for value in words[4:7]],
+        "current_limits_commissioned_mask": words[7],
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--serial", help="Select a specific CMSIS-DAP probe by serial number")

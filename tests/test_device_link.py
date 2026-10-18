@@ -21,6 +21,7 @@ class FakeOpenOCD:
         self.words[32:40] = [0, 3000, 0, 0, 0, 0, 0, 0]
         self.mailbox = struct.pack("<8I", device_link.MAILBOX_MAGIC, 1, 0, 0, 0, 0, 0, 0)
         self.adc_words = [0x54454344, 4, 1, 1000, 1489, 3300, 3, 0]
+        self.limit_words = [0x5445434C, 4, 1, 1000, 0, 9000, 9000, 0]
         self.commands = []
         self.options = []
         self.reject = 0
@@ -38,6 +39,8 @@ class FakeOpenOCD:
                     data = self.mailbox
                 elif address == 0x20000300:
                     data = struct.pack("<8I", *self.adc_words)
+                elif address == 0x20000400:
+                    data = struct.pack("<8I", *self.limit_words)
                 else:
                     data = struct.pack("<40I", *self.words)
                 Path(path).write_bytes(data[:int(size)])
@@ -81,6 +84,7 @@ class DeviceLinkTest(unittest.TestCase):
             status = self.link.read_status()
             self.assertEqual(status["margin_c"], 3)
             self.assertNotIn("adc_diagnostics", status)
+            self.assertNotIn("current_limits_a", status)
         self.assertIn("target create status.mem mem_ap -dap status.dap -ap-num 0", self.fake.commands)
         self.assertFalse(any(re.search(r"\b(halt|reset|program)\b", command) for command in self.fake.commands
                              if not command.startswith("reset_config")))
@@ -150,6 +154,45 @@ class DeviceLinkTest(unittest.TestCase):
         self.assertEqual(writes[0], "mww 0x20000208 0")
         self.assertTrue(writes[1].startswith("load_image"))
         self.assertEqual(writes[2], "mww 0x20000208 0x1")
+
+    def test_optional_limit_metadata_reports_actual_uncommissioned_thresholds(self):
+        metadata = json.loads(self.metadata.read_text())
+        metadata.update(limit_configuration_address=0x20000400, limit_configuration_size=32)
+        self.metadata.write_text(json.dumps(metadata))
+        with patch.object(device_link.subprocess, "run", self.fake):
+            result = self.link.read_status()
+        self.assertEqual(result["current_limits_a"], [0, 9, 9])
+        self.assertEqual(result["current_limits_commissioned_mask"], 0)
+        self.assertTrue(result["current_limit_policy"]["valid"])
+        dumps = [command for command in self.fake.commands
+                 if command.startswith("dump_image") and command.endswith("0x20000400 32")]
+        self.assertEqual(len(dumps), 4)
+        self.assertFalse(any(command.startswith(("mww", "load_image")) for command in self.fake.commands))
+
+    def test_bad_limit_policy_disables_metadata_without_blocking_stop(self):
+        metadata = json.loads(self.metadata.read_text())
+        metadata.update(limit_configuration_address=0x20000400, limit_configuration_size=32)
+        self.metadata.write_text(json.dumps(metadata))
+        for index, value in ((0, 0), (2, 2), (3, 99999), (5, 10000), (7, 1)):
+            with self.subTest(index=index, value=value):
+                self.fake = FakeOpenOCD()
+                self.fake.limit_words[index] = value
+                with patch.object(device_link.subprocess, "run", self.fake):
+                    result = self.link.read_status()
+                    self.assertNotIn("current_limits_a", result)
+                    self.assertFalse(result["current_limit_policy"]["valid"])
+                    stopped = self.link.command("stop")
+                    self.assertEqual(stopped["armed_mask"], 0)
+                    self.assertNotIn("current_limits_a", stopped)
+
+    def test_bad_limit_address_prevents_probe_access(self):
+        metadata = json.loads(self.metadata.read_text())
+        metadata.update(limit_configuration_address=0x40000000, limit_configuration_size=32)
+        self.metadata.write_text(json.dumps(metadata))
+        with patch.object(device_link.subprocess, "run", self.fake):
+            with self.assertRaisesRegex(RuntimeError, "SRAM"):
+                self.link.read_status()
+        self.assertEqual(self.fake.commands, [])
 
     def test_margin_stop_and_locked_arm(self):
         with patch.object(device_link.subprocess, "run", self.fake):

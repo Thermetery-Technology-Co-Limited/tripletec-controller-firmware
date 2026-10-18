@@ -4,7 +4,8 @@ import sys
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from gui.model import Snapshot, channel_status, format_value, margin_millic, mode_label
+from gui.model import (Snapshot, channel_status, current_trip_label, format_value,
+                       margin_millic, mode_label)
 
 
 def status(**changes):
@@ -87,7 +88,8 @@ class PresentationTests(unittest.TestCase):
 
     def test_start_requires_complete_healthy_acquisition(self):
         healthy = status(outputs_locked_off=False, active_faults=[0, 0, 0],
-                         plate_c=[25, 26, 27], valid_flags=63)
+                         plate_c=[25, 26, 27], valid_flags=63,
+                         current_limits_a=[40, 9, 9], current_limits_commissioned_mask=7)
         sample = Snapshot.from_status(healthy, 0)
         self.assertIsNone(sample.start_block_reason(True, 0))
         for update, text in (({"active_faults": None}, "Fault state"),
@@ -97,6 +99,45 @@ class PresentationTests(unittest.TestCase):
             with self.subTest(update=update):
                 sample = Snapshot.from_status({**healthy, **update}, 0)
                 self.assertIn(text, sample.start_block_reason(True, 0))
+
+    def test_current_trip_settings_are_reported_and_not_inferred(self):
+        sample = Snapshot.from_status(status(current_limits_a=[0, 9, 8.5],
+                                             current_limits_commissioned_mask=0), 0)
+        self.assertEqual(sample.current_limits_a, (0, 9, 8.5))
+        self.assertEqual(current_trip_label(sample, 0), "SW trip unset · uncommissioned")
+        self.assertEqual(current_trip_label(sample, 1), "SW trip 9 A · uncommissioned")
+        self.assertEqual(current_trip_label(sample, 2), "SW trip 8.5 A · uncommissioned")
+        self.assertEqual(current_trip_label(Snapshot.from_status(status(), 0), 1), "SW trip unavailable")
+        self.assertEqual(current_trip_label(None, 1), "SW trip unavailable")
+        sample = Snapshot.from_status(status(current_limits_a=[40, 9, 9]), 0)
+        self.assertIn("commissioning unknown", current_trip_label(sample, 1))
+        sample = Snapshot.from_status(status(current_limits_a=[40, 9, 9],
+                                             current_limits_commissioned_mask=2), 0)
+        self.assertEqual(current_trip_label(sample, 1), "SW trip 9 A")
+        self.assertIn("uncommissioned", current_trip_label(sample, 2))
+
+    def test_invalid_current_trip_configuration_is_rejected(self):
+        for update in ({"current_limits_a": [40, 9]},
+                       *({"current_limits_a": values} for values in
+                         ([51, 9, 9], [40, 9.01, 9], [40, 9, 10], [40, -1, 9],
+                          [40, math.nan, 9], [40, True, 9], [40, None, 9])),
+                       *({"current_limits_commissioned_mask": value} for value in (-1, 8, True, "7"))):
+            with self.subTest(update=update), self.assertRaises(ValueError):
+                Snapshot.from_status(status(**update), 0)
+
+    def test_start_requires_known_positive_commissioned_current_trips_in_both_modes(self):
+        healthy = status(outputs_locked_off=False, active_faults=[0, 0, 0],
+                         plate_c=[25, 26, 27], valid_flags=63,
+                         current_limits_a=[40, 9, 9], current_limits_commissioned_mask=7)
+        for mode in (0, 1):
+            for update, reason in (({"current_limits_a": None}, "unavailable"),
+                                   ({"current_limits_a": [0, 9, 9]}, "positive"),
+                                   ({"current_limits_commissioned_mask": None}, "commissioned"),
+                                   ({"current_limits_commissioned_mask": 6}, "commissioned")):
+                with self.subTest(mode=mode, update=update):
+                    sample = Snapshot.from_status({**healthy, "mode": mode, **update}, 0)
+                    self.assertIn(reason, sample.start_block_reason(True, 0))
+            self.assertIsNone(Snapshot.from_status({**healthy, "mode": mode}, 0).start_block_reason(True, 0))
 
     def test_margin_bounds_and_units(self):
         self.assertEqual(margin_millic("0.5"), 500)

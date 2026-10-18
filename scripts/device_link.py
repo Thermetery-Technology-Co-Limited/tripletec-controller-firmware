@@ -14,9 +14,9 @@ import time
 import zlib
 
 try:
-    from .read_status import consistent_snapshot, consistent_adc_diagnostics
+    from .read_status import consistent_snapshot, consistent_adc_diagnostics, consistent_limit_configuration
 except ImportError:
-    from read_status import consistent_snapshot, consistent_adc_diagnostics
+    from read_status import consistent_snapshot, consistent_adc_diagnostics, consistent_limit_configuration
 
 ROOT = Path(__file__).resolve().parents[1]
 MAILBOX_MAGIC = 0x54454343
@@ -71,6 +71,10 @@ class DeviceLink:
                 if metadata.get("adc_diagnostics_size") != 32:
                     raise RuntimeError("Unsupported ADC diagnostic size; rebuild firmware")
                 _ram_region(metadata["adc_diagnostics_address"], 32)
+            if "limit_configuration_address" in metadata:
+                if metadata.get("limit_configuration_size") != 32:
+                    raise RuntimeError("Unsupported current-limit block size; rebuild firmware")
+                _ram_region(metadata["limit_configuration_address"], 32)
             return metadata
         except (OSError, ValueError, KeyError, TypeError) as error:
             raise RuntimeError("Firmware symbol metadata missing or invalid; build firmware first") from error
@@ -119,6 +123,11 @@ class DeviceLink:
                 diagnostics = [directory / f"adc{i}.bin" for i in range(4)]
                 commands.extend(f"dump_image {_tcl_path(path)} {metadata['adc_diagnostics_address']:#x} 32"
                                 for path in diagnostics)
+            limit_snapshots = []
+            if "limit_configuration_address" in metadata:
+                limit_snapshots = [directory / f"limit{i}.bin" for i in range(4)]
+                commands.extend(f"dump_image {_tcl_path(path)} {metadata['limit_configuration_address']:#x} 32"
+                                for path in limit_snapshots)
             mailbox_path = directory / "mailbox.bin"
             if mailbox:
                 address = _ram_region(metadata.get("mailbox_address"), MAILBOX_SIZE)
@@ -138,6 +147,23 @@ class DeviceLink:
                                 try:
                                     status["adc_diagnostics"] = consistent_adc_diagnostics(
                                         earlier.read_bytes(), later.read_bytes())
+                                    break
+                                except ValueError:
+                                    continue
+                        if limit_snapshots:
+                            status["current_limit_policy"] = {
+                                "valid": False, "error": "No consistent current-limit snapshot"
+                            }
+                            for earlier, later in zip(limit_snapshots, limit_snapshots[1:]):
+                                try:
+                                    policy = consistent_limit_configuration(earlier.read_bytes(), later.read_bytes())
+                                    age = min((status["uptime_ms"] - policy["uptime_ms"]) & 0xFFFFFFFF,
+                                              (policy["uptime_ms"] - status["uptime_ms"]) & 0xFFFFFFFF)
+                                    if age > 2000:
+                                        raise ValueError("Current-limit policy is stale")
+                                    status["current_limit_policy"] = policy
+                                    status["current_limits_a"] = policy["current_limits_a"]
+                                    status["current_limits_commissioned_mask"] = policy["current_limits_commissioned_mask"]
                                     break
                                 except ValueError:
                                     continue

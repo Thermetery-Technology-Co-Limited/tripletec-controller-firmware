@@ -10,6 +10,8 @@ python -m gui --connect
 
 The dashboard shows ambient temperature/RH, dew point, regulated target, plate temperatures, nominal currents, and requested versus applied duty. Select **Regulated** or **Unregulated (100%)**, then apply the setting. Changing modes disarms all channels. The margin is adjustable from 0.5°C to 20°C in regulated mode. **Stop** is always available while connected; **Start** is disabled by the firmware's bench output lock.
 
+XT60 channels 2/3 now have a selected **9A software trip threshold**, displayed from firmware beside the measured current. A sample at or above 9A in magnitude trips, zeros demand and disarms that channel in either mode; configuration above 9A is rejected. No automatic rearm follows recovery. Channel 1 remains unset. All current-limit commissioning flags remain false, so selecting 9A does not grant permission to energize. This is a sampled shutdown, not a regulated 9A current source: full-voltage PWM peaks can exceed the threshold before acquisition. The output lock and the 27A load/power-path concerns remain in place.
+
 Unregulated mode bypasses condensation protection and the regulated 0°C target floor. With commissioned hardware it ramps toward 100% duty without PI regulation; fresh sensor readings, valid calibrated currents, commissioned per-channel current limits, hardware verification, and operating-temperature limits still apply. It can cause condensation. The current bench firmware cannot energize TECs in either mode.
 
 `python -m gui --demo` runs an explicitly labeled simulation without touching hardware. Live monitoring and commands use the existing Pico SWD connection; no UART wiring is required. The GUI waits for firmware acknowledgement before showing a change as applied, and keeps hardware work outside the UI thread.
@@ -57,7 +59,7 @@ The image is `build/stm32/tripletec-bench.elf`, with matching `.bin`, `.hex`, ma
 - Three-channel controller, independent of the hardware drivers, with regulated and unregulated modes and a configurable margin initialized to 3°C.
 - Magnus dew point over the liquid-water curve. Rejects RH outside `(0,100]`, nonfinite inputs, and ambient/dew-point values outside −45…60°C. A 0°C target floor is retained until frost protection is developed.
 - PI demand, a 50% provisional duty cap, upward slew limiting, immediate reductions, anti-windup, and a 0.2°C restart hysteresis. Gains and limits are placeholders for powered commissioning.
-- Explicit per-channel arming and a separate hardware-verified gate. Sensor, freshness, configuration, timing, arithmetic and current faults stop and disarm affected channels. Current limits default to zero (uncommissioned), so arming is refused until limits are set and measurements are calibrated. Recovery does not automatically rearm channels. Reaching the regulated target is a normal, automatically recovering cooling inhibit.
+- Explicit per-channel arming and a separate hardware-verified gate. Sensor, freshness, configuration, timing, arithmetic and current faults stop and disarm affected channels. Selected current thresholds default to unset/9A/9A; independent commissioning flags default false for every channel, preventing arming. Measurements must also be calibrated. Recovery does not automatically rearm channels. Reaching the regulated target is a normal, automatically recovering cooling inhibit.
 - SHT31 I²C measurement with both CRC checks and bounded bus operations.
 - ADS1220 SPI configuration/readback verification and three-channel single-shot acquisition, with signed 24-bit decoding and DRDY timeout handling.
 - Nominal 100kΩ/B3950 thermistor conversion, open/short/range detection, and nominal per-channel ACS725 current conversion.
@@ -96,6 +98,8 @@ The MCU USB schematic has no explicit 1.5kΩ D+ pullup, so direct USB CDC is not
 Telemetry `valid_flags`: bit 0 fresh ambient sample; bit 1 verified ADS configuration; bits 2/3/4 fresh plate temperatures; bit 5 valid current ADC acquisition. These indicate acquisition validity, not calibration or permission to cool. `active_faults=2` is the intentional hardware gate in the bench image; other bits are defined in `core/controller.h`. Applied duty is always zero.
 
 An optional, independently sequenced 32-byte ADC diagnostic block reports ADC1 channel 17 VREFINT, acquisition errors and an estimated VDDA using nominal 1.20V. Its symbol is included in the generated metadata; the main telemetry remains schema 2. The estimate is not a calibrated supply measurement and does not sense the external 12V rail. A failed or implausible internal-reference acquisition invalidates current readings. Main telemetry and this diagnostic block may come from adjacent publications; each includes its own sequence and uptime.
+
+Another optional 32-byte block reports selected current-trip thresholds and their commissioning mask. The host rejects malformed, out-of-range or stale policy snapshots without blocking STOP. The GUI treats missing or uncommissioned settings as a Start inhibit. Version 0.2.2 includes this block and matching desktop metadata.
 
 ## Limits before powered operation
 

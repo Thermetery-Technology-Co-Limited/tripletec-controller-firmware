@@ -13,6 +13,7 @@ static void commissioned_config(tec_config_t *config)
     tec_config_defaults(config);
     for (i = 0U; i < TEC_CHANNEL_COUNT; ++i) {
         config->current_limit_a[i] = 5.0f;
+        config->current_limit_commissioned[i] = true;
     }
 }
 

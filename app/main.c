@@ -18,6 +18,7 @@
 
 volatile bench_telemetry_t g_telemetry;
 volatile adc_diagnostics_telemetry_t g_adc_diagnostics;
+volatile limit_configuration_telemetry_t g_limit_configuration;
 volatile control_mailbox_t g_command_mailbox = {
     .magic = CONTROL_MAILBOX_MAGIC, .version = CONTROL_PROTOCOL_VERSION
 };
@@ -82,6 +83,7 @@ static void publish(uint32_t now)
 {
     bench_telemetry_t next = {0};
     adc_diagnostics_telemetry_t diagnostic = {0};
+    limit_configuration_telemetry_t limits = {0};
     const uint32_t sequence = g_telemetry.seq;
     next.magic = UINT32_C(0x54454331);
     next.seq = sequence + 1U;
@@ -90,6 +92,10 @@ static void publish(uint32_t now)
     next.outputs_locked = 1U;
     next.sht_errors = sht_errors;
     next.ads_errors = ads_errors;
+    limits.magic = UINT32_C(0x5445434c);
+    limits.seq = sequence + 1U;
+    limits.schema = 1U;
+    limits.uptime_ms = now;
     next.ambient_mc = inputs.ambient_valid ? milli(inputs.ambient_c) : INT32_MIN;
     next.rh_mpercent = inputs.ambient_valid ? milli(inputs.rh_percent) : INT32_MIN;
     next.dewpoint_mc = milli(outputs.dewpoint_c);
@@ -101,6 +107,10 @@ static void publish(uint32_t now)
         next.valid_flags |= 2U;
     }
     for (size_t i = 0U; i < 3U; ++i) {
+        limits.current_limit_ma[i] = (uint32_t)milli(controller.config.current_limit_a[i]);
+        if (controller.config.current_limit_commissioned[i]) {
+            limits.commissioned_mask |= 1U << i;
+        }
         const bool fresh = inputs.plate[i].valid && now - inputs.plate[i].timestamp_ms <= 2000U;
         next.plate_mc[i] = fresh ? milli(inputs.plate[i].temperature_c) : INT32_MIN;
         next.ntc_adc_raw[i] = ntc_codes[i];
@@ -135,12 +145,15 @@ static void publish(uint32_t now)
     diagnostic.adc_errors = adc_errors;
     g_telemetry.seq = sequence + 1U;
     g_adc_diagnostics.seq = sequence + 1U;
+    g_limit_configuration.seq = sequence + 1U;
     __asm volatile("dmb" ::: "memory");
     g_telemetry = next;
     g_adc_diagnostics = diagnostic;
+    g_limit_configuration = limits;
     __asm volatile("dmb" ::: "memory");
     g_telemetry.seq = sequence + 2U;
     g_adc_diagnostics.seq = sequence + 2U;
+    g_limit_configuration.seq = sequence + 2U;
 }
 
 static void disarm_all(void)

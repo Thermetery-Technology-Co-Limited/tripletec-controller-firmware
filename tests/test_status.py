@@ -82,6 +82,29 @@ class StatusTest(unittest.TestCase):
             with self.subTest(other=other), self.assertRaises(ValueError):
                 status.consistent_adc_diagnostics(invalid, other)
 
+    def test_limit_configuration_uses_first_consistent_snapshot(self):
+        first = struct.pack("<8I", 0x5445434C, 2, 1, 1000, 0, 9000, 9000, 0)
+        second = struct.pack("<8I", 0x5445434C, 2, 1, 1000, 5000, 4500, 4500, 7)
+        result = status.consistent_limit_configuration(first, second)
+        self.assertEqual(result["current_limits_a"], [0, 9, 9])
+        self.assertEqual(result["current_limits_commissioned_mask"], 0)
+
+    def test_limit_configuration_rejects_torn_or_unsafe_fields(self):
+        words = [0x5445434C, 2, 1, 1000, 0, 9000, 9000, 0]
+        first = struct.pack("<8I", *words)
+        for index, value in ((0, 0), (1, 3), (2, 2), (4, 50001), (5, 9001), (6, 10000), (7, 8), (7, 1)):
+            changed = words.copy()
+            changed[index] = value
+            payload = struct.pack("<8I", *changed)
+            with self.subTest(index=index, value=value), self.assertRaises(ValueError):
+                status.consistent_limit_configuration(payload, payload)
+        with self.assertRaises(ValueError):
+            status.consistent_limit_configuration(first, first[:28])
+        changed = words.copy()
+        changed[1] = 4
+        with self.assertRaises(ValueError):
+            status.consistent_limit_configuration(first, struct.pack("<8I", *changed))
+
 
 if __name__ == "__main__":
     unittest.main()

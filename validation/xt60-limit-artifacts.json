@@ -1,0 +1,12 @@
+{
+  "firmware": {
+    "path": "build/stm32/tripletec-bench.bin",
+    "bytes": 16272,
+    "sha256": "cc533430d53478a48365c0977263455f747da2c73d23d69ec44ce0b1ff6b70d9"
+  },
+  "desktop": {
+    "path": "build/gui/TripleTEC-Control.exe",
+    "bytes": 13506931,
+    "sha256": "7a6ee0950a28fa252df74d83b01daa1d6a8c595bdf72e5b8730220d422e96ee1"
+  }
+}

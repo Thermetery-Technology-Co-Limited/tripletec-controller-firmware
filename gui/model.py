@@ -67,6 +67,8 @@ class Snapshot:
     sht31_errors: int | None
     ads1220_errors: int | None
     valid_flags: int | None
+    current_limits_a: tuple
+    current_limits_commissioned_mask: int | None
 
     @classmethod
     def from_status(cls, data: dict, received_at: float) -> "Snapshot":
@@ -93,6 +95,14 @@ class Snapshot:
         # sensor input (for example an unpowered current-sense output at a rail).
         current = tuple(None if fault is not None and fault & CURRENT_INVALID else value
                         for value, fault in zip(current, faults))
+        limits = _triple(data, "current_limits_a")
+        if data.get("current_limits_a") is not None and any(
+                value is None or not 0 <= value <= maximum
+                for value, maximum in zip(limits, (50, 9, 9))):
+            raise ValueError("Unsupported current trip settings; controls remain disabled")
+        commissioned = _integer(data.get("current_limits_commissioned_mask"), 0, 7)
+        if data.get("current_limits_commissioned_mask") is not None and commissioned is None:
+            raise ValueError("Unsupported current commissioning state; controls remain disabled")
         return cls(
             received_at, schema, _number(data.get("ambient_c")),
             _number(data.get("rh_percent")), _number(data.get("dewpoint_c")),
@@ -103,6 +113,7 @@ class Snapshot:
             _integer(data.get("armed_mask"), 0, 7) if schema == 2 else None,
             _integer(data.get("uptime_ms")), _integer(data.get("sht31_errors")),
             _integer(data.get("ads1220_errors")), _integer(data.get("valid_flags")),
+            limits, commissioned,
         )
 
     def stale(self, now: float) -> bool:
@@ -129,6 +140,12 @@ class Snapshot:
             return "All three current sensors must provide valid readings before starting."
         if self.valid_flags is None or self.valid_flags & 0x3F != 0x3F:
             return "Sensor acquisition is incomplete or stale. Start remains disabled."
+        if any(value is None for value in self.current_limits_a):
+            return "Current trip settings are unavailable. Start remains disabled."
+        if any(value <= 0 for value in self.current_limits_a):
+            return "Every channel needs a positive current trip setting before starting."
+        if self.current_limits_commissioned_mask != 7:
+            return "Current trip settings must be commissioned on all channels before starting."
         return None
 
 
@@ -144,6 +161,20 @@ def margin_millic(text: str) -> int:
 
 def format_value(value: float | None, unit: str = "", decimals: int = 1) -> str:
     return "—" if value is None else f"{value:.{decimals}f}{unit}"
+
+
+def current_trip_label(snapshot: Snapshot | None, index: int) -> str:
+    """Describe reported configuration separately from measured current and lock state."""
+    limit = snapshot.current_limits_a[index] if snapshot else None
+    if limit is None:
+        return "SW trip unavailable"
+    threshold = f"SW trip {limit:g} A" if limit > 0 else "SW trip unset"
+    mask = snapshot.current_limits_commissioned_mask
+    if mask is None:
+        return threshold + " · commissioning unknown"
+    if limit <= 0 or not mask & (1 << index):
+        return threshold + " · uncommissioned"
+    return threshold
 
 
 def channel_status(snapshot: Snapshot, index: int, connected: bool, now: float) -> str:

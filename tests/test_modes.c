@@ -11,6 +11,7 @@ static void configured(tec_config_t *cfg)
     tec_config_defaults(cfg);
     for (i = 0U; i < TEC_CHANNEL_COUNT; ++i) {
         cfg->current_limit_a[i] = 5.0f;
+        cfg->current_limit_commissioned[i] = true;
     }
 }
 
@@ -98,6 +99,8 @@ static void mode_changes_disarm_every_channel(void)
     size_t i;
     float previous;
     configured(&cfg);
+    cfg.current_limit_a[1] = TEC_XT60_CURRENT_CEILING_A;
+    cfg.current_limit_a[2] = 4.5f;
     assert(tec_controller_init(&c, &cfg));
     tec_controller_step(&c, &in, 0U, &out);
     arm_all(&c);
@@ -112,6 +115,8 @@ static void mode_changes_disarm_every_channel(void)
     assert(tec_controller_set_mode(&c, TEC_MODE_UNREGULATED));
     for (i = 0U; i < TEC_CHANNEL_COUNT; ++i) {
         assert(!c.channel[i].armed && c.channel[i].duty == 0.0f && c.channel[i].integral == 0.0f);
+        assert(c.config.current_limit_a[i] == cfg.current_limit_a[i]);
+        assert(c.config.current_limit_commissioned[i] == cfg.current_limit_commissioned[i]);
     }
     freshen(&in, 200U);
     tec_controller_step(&c, &in, 200U, &out);
@@ -122,6 +127,10 @@ static void mode_changes_disarm_every_channel(void)
     assert(out.channel[0].duty > 0.0f);
     assert(tec_controller_set_mode(&c, TEC_MODE_REGULATED));
     assert(!c.channel[0].armed && c.channel[0].duty == 0.0f);
+    for (i = 0U; i < TEC_CHANNEL_COUNT; ++i) {
+        assert(c.config.current_limit_a[i] == cfg.current_limit_a[i]);
+        assert(c.config.current_limit_commissioned[i] == cfg.current_limit_commissioned[i]);
+    }
     assert(!tec_controller_set_mode(NULL, TEC_MODE_UNREGULATED));
 }
 
@@ -183,30 +192,135 @@ static void defaults_cannot_arm_and_limits_validate(void)
     tec_config_t cfg;
     tec_inputs_t in = good_inputs(0U);
     tec_outputs_t out;
+    tec_mode_t mode;
     size_t i;
     tec_config_defaults(&cfg);
+    assert(cfg.current_limit_a[0] == 0.0f);
+    assert(cfg.current_limit_a[1] == 9.0f && cfg.current_limit_a[2] == 9.0f);
     assert(tec_controller_init(&c, &cfg));
-    for (i = 0U; i < TEC_CHANNEL_COUNT; ++i) {
-        assert(cfg.current_limit_a[i] == 0.0f);
-        assert(!tec_controller_set_armed(&c, i, true));
+    for (mode = TEC_MODE_REGULATED; mode <= TEC_MODE_UNREGULATED;
+         mode = (tec_mode_t)((int)mode + 1)) {
+        assert(tec_controller_set_mode(&c, mode));
+        for (i = 0U; i < TEC_CHANNEL_COUNT; ++i) {
+            assert(!cfg.current_limit_commissioned[i]);
+            assert(!c.config.current_limit_commissioned[i]);
+            assert(c.config.current_limit_a[i] == cfg.current_limit_a[i]);
+            assert(!tec_controller_set_armed(&c, i, true));
+        }
+        tec_controller_step(&c, &in, 0U, &out);
+        for (i = 0U; i < TEC_CHANNEL_COUNT; ++i) {
+            assert(out.channel[i].active_faults == TEC_FAULT_CURRENT_UNCOMMISSIONED);
+            assert(out.channel[i].duty == 0.0f && !out.channel[i].armed);
+        }
     }
-    tec_controller_step(&c, &in, 0U, &out);
-    assert(out.channel[0].active_faults & TEC_FAULT_CURRENT_UNCOMMISSIONED);
-    assert(out.channel[0].duty == 0.0f);
-    assert(tec_controller_set_mode(&c, TEC_MODE_UNREGULATED));
-    assert(!tec_controller_set_armed(&c, 0U, true));
     configured(&cfg);
     cfg.current_limit_a[0] = 50.01f;
     assert(!tec_controller_init(&c, &cfg));
+    /* The first channel retains its separate 50 A sensor range. */
     configured(&cfg);
-    cfg.current_limit_a[1] = 10.01f;
-    assert(!tec_controller_init(&c, &cfg));
+    cfg.current_limit_a[0] = 50.0f;
+    cfg.current_limit_a[1] = TEC_XT60_CURRENT_CEILING_A;
+    cfg.current_limit_a[2] = TEC_XT60_CURRENT_CEILING_A;
+    assert(tec_controller_init(&c, &cfg));
+    for (i = 1U; i < TEC_CHANNEL_COUNT; ++i) {
+        const float invalid_limits[] = {
+            nextafterf(TEC_XT60_CURRENT_CEILING_A, INFINITY), 9.001f, 10.0f,
+            -1.0f, NAN, INFINITY
+        };
+        size_t limit;
+        for (limit = 0U; limit < sizeof(invalid_limits) / sizeof(invalid_limits[0]); ++limit) {
+            configured(&cfg);
+            cfg.current_limit_a[i] = invalid_limits[limit];
+            assert(!tec_controller_init(&c, &cfg));
+            assert(!tec_controller_set_mode(&c, TEC_MODE_UNREGULATED));
+        }
+    }
     configured(&cfg);
-    cfg.current_limit_a[2] = -1.0f;
-    assert(!tec_controller_init(&c, &cfg));
+    cfg.current_limit_a[2] = 0.0f;
+    assert(tec_controller_init(&c, &cfg));
+    assert(!tec_controller_set_armed(&c, 2U, true));
+    tec_controller_step(&c, &in, 0U, &out);
+    assert(out.channel[2].active_faults == TEC_FAULT_CURRENT_UNCOMMISSIONED);
+    configured(&cfg);
+    cfg.current_limit_commissioned[1] = false;
+    assert(tec_controller_init(&c, &cfg));
+    assert(!tec_controller_set_armed(&c, 1U, true));
+    assert(tec_controller_set_mode(&c, TEC_MODE_UNREGULATED));
+    assert(!c.config.current_limit_commissioned[1]);
+    tec_controller_step(&c, &in, 0U, &out);
+    assert(out.channel[1].active_faults == TEC_FAULT_CURRENT_UNCOMMISSIONED);
     configured(&cfg);
     cfg.current_limit_a[0] = NAN;
     assert(!tec_controller_init(&c, &cfg));
+}
+
+static void xt60_trip_boundary_and_lower_limits_in_both_modes(void)
+{
+    const float limits[] = {TEC_XT60_CURRENT_CEILING_A, 4.5f};
+    tec_mode_t mode;
+    size_t channel;
+    size_t limit;
+    for (mode = TEC_MODE_REGULATED; mode <= TEC_MODE_UNREGULATED;
+         mode = (tec_mode_t)((int)mode + 1)) {
+        for (channel = 1U; channel < TEC_CHANNEL_COUNT; ++channel) {
+            for (limit = 0U; limit < sizeof(limits) / sizeof(limits[0]); ++limit) {
+                const float threshold = limits[limit];
+                const float samples[] = {
+                    nextafterf(threshold, 0.0f), -nextafterf(threshold, 0.0f),
+                    threshold, -threshold,
+                    nextafterf(threshold, INFINITY), -nextafterf(threshold, INFINITY)
+                };
+                size_t sample;
+                for (sample = 0U; sample < sizeof(samples) / sizeof(samples[0]); ++sample) {
+                    tec_controller_t c;
+                    tec_config_t cfg;
+                    tec_inputs_t in = good_inputs(0U);
+                    tec_outputs_t out;
+                    size_t other;
+                    configured(&cfg);
+                    cfg.current_limit_a[channel] = threshold;
+                    assert(tec_controller_init(&c, &cfg));
+                    assert(tec_controller_set_mode(&c, mode));
+                    tec_controller_step(&c, &in, 0U, &out);
+                    arm_all(&c);
+                    freshen(&in, 100U);
+                    tec_controller_step(&c, &in, 100U, &out);
+                    assert(out.channel[channel].duty > 0.0f);
+                    freshen(&in, 200U);
+                    in.current[channel].amperes = samples[sample];
+                    tec_controller_step(&c, &in, 200U, &out);
+                    if (sample < 2U) {
+                        assert(out.channel[channel].duty > 0.0f && out.channel[channel].armed);
+                        assert(out.channel[channel].active_faults == TEC_FAULT_NONE);
+                        assert(out.channel[channel].latched_faults == TEC_FAULT_NONE);
+                    } else {
+                        assert(out.channel[channel].duty == 0.0f && !out.channel[channel].armed);
+                        assert(c.channel[channel].integral == 0.0f);
+                        assert(out.channel[channel].active_faults == TEC_FAULT_CURRENT_OVERLIMIT);
+                        assert(out.channel[channel].latched_faults == TEC_FAULT_CURRENT_OVERLIMIT);
+                        in.current[channel].amperes = 0.0f;
+                        freshen(&in, 300U);
+                        tec_controller_step(&c, &in, 300U, &out);
+                        assert(out.channel[channel].duty == 0.0f && !out.channel[channel].armed);
+                        assert(out.channel[channel].active_faults == TEC_FAULT_NONE);
+                        assert(out.channel[channel].latched_faults == TEC_FAULT_CURRENT_OVERLIMIT);
+                        assert(tec_controller_set_armed(&c, channel, true));
+                        freshen(&in, 400U);
+                        tec_controller_step(&c, &in, 400U, &out);
+                        assert(out.channel[channel].duty > 0.0f && out.channel[channel].armed);
+                        assert(out.channel[channel].latched_faults == TEC_FAULT_NONE);
+                    }
+                    for (other = 0U; other < TEC_CHANNEL_COUNT; ++other) {
+                        if (other != channel) {
+                            assert(out.channel[other].duty > 0.0f && out.channel[other].armed);
+                            assert(out.channel[other].active_faults == TEC_FAULT_NONE);
+                            assert(out.channel[other].latched_faults == TEC_FAULT_NONE);
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 static void unregulated_retains_other_sensor_and_timing_stops(void)
@@ -264,6 +378,7 @@ int main(void)
     mode_changes_disarm_every_channel();
     current_interlocks_apply_in_both_modes();
     defaults_cannot_arm_and_limits_validate();
+    xt60_trip_boundary_and_lower_limits_in_both_modes();
     unregulated_retains_other_sensor_and_timing_stops();
     puts("mode/current interlock tests passed");
     return 0;

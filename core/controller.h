@@ -6,6 +6,9 @@
 #include <stdint.h>
 
 #define TEC_CHANNEL_COUNT 3U
+/* XT60 channels 2/3 have 10 A current sensors. This ceiling is a sampled
+ * software shutdown threshold, not a constant-current output capability. */
+#define TEC_XT60_CURRENT_CEILING_A 9.0f
 
 typedef enum {
     TEC_MODE_REGULATED = 0,
@@ -46,10 +49,13 @@ typedef struct {
     float ki;                  /* duty / (degree C * second) */
     float max_duty;            /* 0 < maximum <= 1 */
     float rise_per_second;     /* duty / second; reductions are immediate */
-    /* Zero means uncommissioned: arming is refused. Per-channel limits must
-     * be verified against wiring, TEC and driver ratings before enabling.
-     * Maximum representable sensor ranges are 50 A,10 A,10 A respectively. */
+    /* A sample at or above the magnitude threshold immediately trips that
+     * channel. Limits must be verified against wiring, TEC and driver ratings.
+     * Zero disables arming. Channels 2/3 may never exceed the XT60 ceiling. */
     float current_limit_a[TEC_CHANNEL_COUNT];
+    /* A selected threshold is not commissioning evidence. Keep this false
+     * until the current protection and assembled power path are verified. */
+    bool current_limit_commissioned[TEC_CHANNEL_COUNT];
 } tec_config_t;
 
 typedef struct {
@@ -119,7 +125,7 @@ bool tec_controller_set_mode(tec_controller_t *controller, tec_mode_t mode);
 /* Arming is explicit and per channel. Rearming clears its latched faults and
  * resets its integral/output. The next step still verifies every interlock.
  * A fault while armed disarms that channel; sensor recovery never rearms it.
- * Arming is refused when that channel's configured current limit is zero. */
+ * Arming requires a positive, explicitly commissioned current limit. */
 bool tec_controller_set_armed(tec_controller_t *controller, size_t channel, bool armed);
 
 /* Call regularly with a monotonic uint32 millisecond clock. Unsigned elapsed

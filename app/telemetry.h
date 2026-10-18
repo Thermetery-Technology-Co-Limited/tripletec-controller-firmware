@@ -56,4 +56,17 @@ typedef struct {
 _Static_assert(sizeof(adc_diagnostics_telemetry_t) == 32U, "ADC diagnostic layout changed");
 extern volatile adc_diagnostics_telemetry_t g_adc_diagnostics;
 
+/* Selected software trip thresholds, separate from commissioning approval. */
+typedef struct {
+    uint32_t magic;
+    uint32_t seq;
+    uint32_t schema;
+    uint32_t uptime_ms;
+    uint32_t current_limit_ma[3];
+    uint32_t commissioned_mask;
+} limit_configuration_telemetry_t;
+
+_Static_assert(sizeof(limit_configuration_telemetry_t) == 32U, "limit configuration layout changed");
+extern volatile limit_configuration_telemetry_t g_limit_configuration;
+
 #endif

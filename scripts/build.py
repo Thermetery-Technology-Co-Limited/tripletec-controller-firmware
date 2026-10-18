@@ -73,18 +73,20 @@ def firmware(cc: str) -> None:
     addresses = {}
     for line in symbols.splitlines():
         fields = line.split()
-        if len(fields) == 4 and fields[3] in ("g_telemetry", "g_command_mailbox", "g_adc_diagnostics"):
+        if len(fields) == 4 and fields[3] in ("g_telemetry", "g_command_mailbox", "g_adc_diagnostics", "g_limit_configuration"):
             addresses[fields[3]] = (int(fields[0], 16), int(fields[1], 16))
-    if set(addresses) != {"g_telemetry", "g_command_mailbox", "g_adc_diagnostics"}:
+    if set(addresses) != {"g_telemetry", "g_command_mailbox", "g_adc_diagnostics", "g_limit_configuration"}:
         raise SystemExit("Telemetry/control mailbox missing from linked image")
     address, size = addresses["g_telemetry"]
     mailbox_address, mailbox_size = addresses["g_command_mailbox"]
     diagnostic_address, diagnostic_size = addresses["g_adc_diagnostics"]
-    if size != 160 or mailbox_size != 32 or diagnostic_size != 32:
+    limit_address, limit_size = addresses["g_limit_configuration"]
+    if size != 160 or mailbox_size != 32 or diagnostic_size != 32 or limit_size != 32:
         raise SystemExit("Firmware telemetry/mailbox layout changed; update the host protocol.")
     metadata = {"address": address, "size": size, "schema": 2,
                 "mailbox_address": mailbox_address, "mailbox_size": mailbox_size,
                 "adc_diagnostics_address": diagnostic_address, "adc_diagnostics_size": diagnostic_size,
+                "limit_configuration_address": limit_address, "limit_configuration_size": limit_size,
                 "elf": elf.name,
                 "firmware_sha256": hashlib.sha256((output / "tripletec-bench.bin").read_bytes()).hexdigest()}
     (output / "telemetry-symbol.json").write_text(json.dumps(metadata, indent=2) + "\n")

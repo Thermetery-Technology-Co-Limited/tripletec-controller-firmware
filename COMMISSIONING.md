@@ -2,6 +2,8 @@
 
 Status on 2026-10-18: **not commissioned; retain the compile-time output lock**. TECs and plate thermistors remain disconnected. The operator has a multimeter, but no oscilloscope or adjustable current-limited bench supply.
 
+The selected software trip thresholds are now unset/9A/9A. Channels 2/3 reject configuration above 9A and trip inclusively at a sampled magnitude of 9A in both modes. Every current-limit commissioning flag remains false. This does not limit instantaneous current, change current acquisition speed, validate the power path or enable an output. A roughly 27A full-voltage on-pulse remains outside the XT60 sensors' measurement range even at low average duty.
+
 ## Current blockers
 
 Latest update: the operator identified and secured a loose 10-pin connection. The subsequent 60-snapshot check over 34.25 seconds observed no near-ground current-signal dropouts; nominal mean voltages were 1.6455V, 0.3341V and 0.3348V. All acquisition error counters stayed zero. This supports the connector as the cause of the missing supply, without proving long-term mechanical retention. Channels 2/3 still failed the conservative stability screen: spans were 88.6mV and 66.1mV. Investigate noise and establish stable baselines before calibration; do not treat offset adjustment as a remedy for noise. Thermistors, load/power-path compatibility and active switching validation remain outstanding. Evidence: `validation/secured-harness-check-2026-10-18.json`.
@@ -36,7 +38,7 @@ After the preceding checks pass, start one assembled channel under controlled cu
 
 The current image rejects every ARM request, keeps `hardware_verified=false`, forces PA1/PA2/PA3 LOW before C initialization and throughout the loop, and leaves TIM2 disabled. These protections currently prevent commanded power output. Register reads confirm the static state; they do not establish MOSFET health or capture transient waveforms.
 
-The control core has current/freshness/temperature/configuration trips and disarms on faults, but current is acquired every 250ms. The host lease is 2s and the watchdog approximately 4s. These are not fast short-circuit protection. Current calibration flags remain false and limits remain zero; PI gains, duty ceiling and temperature bounds remain provisional. A future enabled firmware requires a separate commissioning review, physically validated shutdown, suitable load limits and explicit thermal protection. It must not be enabled simply because a diagnostic report looks plausible.
+The control core has current/freshness/temperature/configuration trips and disarms on faults, but current is acquired every 250ms. The host lease is 2s and the watchdog approximately 4s. These are not fast short-circuit protection. Current calibration flags and all limit-commissioning flags remain false; selected limits are unset/9A/9A. PI gains, duty ceiling and temperature bounds remain provisional. A future enabled firmware requires a separate commissioning review, physically validated shutdown, suitable load limits and explicit thermal protection. It must not be enabled simply because a diagnostic report looks plausible.
 
 ## Evidence and sources
 

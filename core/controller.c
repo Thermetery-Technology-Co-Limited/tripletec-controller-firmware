@@ -28,9 +28,9 @@ static bool config_valid(const tec_config_t *c)
         isfinite(c->current_limit_a[0]) && c->current_limit_a[0] >= 0.0f &&
         c->current_limit_a[0] <= 50.0f &&
         isfinite(c->current_limit_a[1]) && c->current_limit_a[1] >= 0.0f &&
-        c->current_limit_a[1] <= 10.0f &&
+        c->current_limit_a[1] <= TEC_XT60_CURRENT_CEILING_A &&
         isfinite(c->current_limit_a[2]) && c->current_limit_a[2] >= 0.0f &&
-        c->current_limit_a[2] <= 10.0f;
+        c->current_limit_a[2] <= TEC_XT60_CURRENT_CEILING_A;
 }
 
 static float clamp(float v, float lo, float hi)
@@ -59,7 +59,8 @@ void tec_config_defaults(tec_config_t *c)
         .ki = 0.02f,
         .max_duty = 0.50f,
         .rise_per_second = 0.10f,
-        .current_limit_a = {0.0f, 0.0f, 0.0f}
+        .current_limit_a = {0.0f, TEC_XT60_CURRENT_CEILING_A, TEC_XT60_CURRENT_CEILING_A},
+        .current_limit_commissioned = {false, false, false}
     };
 }
 
@@ -90,6 +91,7 @@ bool tec_controller_set_armed(tec_controller_t *c, size_t channel, bool armed)
     s->integral = 0.0f;
     s->guard_wait = true;
     if (armed && (c->config.current_limit_a[channel] <= 0.0f ||
+        !c->config.current_limit_commissioned[channel] ||
         (c->mode != TEC_MODE_REGULATED && c->mode != TEC_MODE_UNREGULATED))) {
         return false;
     }
@@ -226,7 +228,8 @@ void tec_controller_step(tec_controller_t *c, const tec_inputs_t *in,
             (uint32_t)(now_ms - in->plate[i].timestamp_ms) > c->config.sample_timeout_ms) {
             faults |= TEC_FAULT_PLATE_STALE;
         }
-        if (c->configuration_valid && c->config.current_limit_a[i] <= 0.0f) {
+        if (c->configuration_valid && (c->config.current_limit_a[i] <= 0.0f ||
+            !c->config.current_limit_commissioned[i])) {
             faults |= TEC_FAULT_CURRENT_UNCOMMISSIONED;
         }
         if (in == NULL || !in->current[i].valid || !isfinite(in->current[i].amperes)) {
@@ -241,7 +244,7 @@ void tec_controller_step(tec_controller_t *c, const tec_inputs_t *in,
                 faults |= TEC_FAULT_CURRENT_STALE;
             }
             if (c->config.current_limit_a[i] > 0.0f && isfinite(in->current[i].amperes) &&
-                fabsf(in->current[i].amperes) > c->config.current_limit_a[i]) {
+                fabsf(in->current[i].amperes) >= c->config.current_limit_a[i]) {
                 faults |= TEC_FAULT_CURRENT_OVERLIMIT;
             }
         }

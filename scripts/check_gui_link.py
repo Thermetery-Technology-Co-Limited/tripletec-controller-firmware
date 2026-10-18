@@ -21,11 +21,19 @@ def require_locked(status: dict) -> None:
         raise RuntimeError("Bench output or arm state is inconsistent")
 
 
+def require_trip_policy(status: dict) -> None:
+    if (status.get("current_limits_a") != [0, 9, 9] or
+            status.get("current_limits_commissioned_mask") != 0 or
+            status.get("current_limit_policy", {}).get("valid") is not True):
+        raise RuntimeError("Bench image did not report the selected, uncommissioned XT60 9A trips")
+
+
 def main() -> None:
     link = DeviceLink()
     observations = {}
     initial = link.read_status()
     require_locked(initial)
+    require_trip_policy(initial)
     if initial.get("schema") != 2:
         raise RuntimeError("Load the command-capable bench image first")
     deadline = time.monotonic() + 5
@@ -36,6 +44,7 @@ def main() -> None:
     try:
         unregulated = link.command("mode", 1)
         require_locked(unregulated)
+        require_trip_policy(unregulated)
         if unregulated["mode"] != 1 or unregulated["target_c"] is not None:
             raise RuntimeError("Unregulated mode did not bypass the temperature target")
         observations["unregulated"] = unregulated
@@ -51,6 +60,7 @@ def main() -> None:
         require_locked(link.command("margin", 4500))
         regulated = link.command("mode", 0)
         require_locked(regulated)
+        require_trip_policy(regulated)
         if (regulated["mode"] != 0 or regulated["margin_c"] != 4.5 or
                 regulated["dewpoint_c"] is None or regulated["target_c"] is None or
                 abs(regulated["target_c"] - max(0, regulated["dewpoint_c"] + 4.5)) > 0.003):
@@ -61,11 +71,12 @@ def main() -> None:
         link.command("mode", 0)
         restored = link.command("margin", 3000)
         require_locked(restored)
+        require_trip_policy(restored)
         observations["restored"] = restored
     output = Path(__file__).resolve().parents[1] / "build/gui/link-check.json"
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(observations, indent=2) + "\n", encoding="utf-8")
-    print("Live GUI protocol checks passed: modes, margin, STOP, rejected ARM, zero outputs.")
+    print("Live GUI protocol checks passed: modes, margin, STOP, rejected ARM, zero outputs, XT60 9A policy.")
     print(output)
 
 

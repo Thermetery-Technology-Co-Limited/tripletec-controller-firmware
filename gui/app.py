@@ -13,7 +13,8 @@ import time
 import tkinter as tk
 from tkinter import ttk
 
-from .model import Snapshot, channel_status, format_value, margin_millic, mode_label
+from .model import (Snapshot, channel_status, current_trip_label, format_value,
+                    margin_millic, mode_label)
 
 COLORS = {"bg": "#0C121B", "panel": "#151E2B", "raised": "#1C2838",
           "line": "#2A384B", "text": "#EAF1FA", "muted": "#8C9EB7",
@@ -119,6 +120,7 @@ class Dashboard:
         self.note = tk.StringVar()
         self.metric_values = []
         self.channel_values = []
+        self.current_trip_values = []
         self._style()
         self._layout()
         self._render()
@@ -230,12 +232,20 @@ class Dashboard:
             status.pack(anchor="w")
             values = []
             for column in range(1, 5):
-                value = self._label(channels, "—", size=16, bold=True)
-                value.grid(row=index + 1, column=column, sticky="w", pady=5)
+                cell = tk.Frame(channels, bg=COLORS["panel"])
+                cell.grid(row=index + 1, column=column, sticky="w", pady=5)
+                value = self._label(cell, "—", size=16, bold=True)
+                value.pack(anchor="w")
+                if column == 2:
+                    trip = self._label(cell, "SW trip unavailable", size=9, color="muted", wraplength=145)
+                    trip.pack(anchor="w")
+                    self.current_trip_values.append(trip)
                 values.append(value)
             self.channel_values.append((status, values))
         self._label(channels, "* Nominal current · uncalibrated; — means unavailable. Applied duty is the firmware output.",
-                    size=9, color="muted").grid(row=4, column=0, columnspan=5, sticky="w", padx=16, pady=(6, 10))
+                    size=9, color="muted").grid(row=4, column=0, columnspan=5, sticky="w", padx=16, pady=(6, 0))
+        self._label(channels, "Software current trip; peak current requires hardware limiting.",
+                    size=9, color="amber").grid(row=5, column=0, columnspan=5, sticky="w", padx=16, pady=(0, 10))
 
         bottom = tk.Frame(shell, bg=COLORS["bg"])
         bottom.grid(row=4, column=0, sticky="ew")
@@ -496,6 +506,7 @@ class Dashboard:
                 "dewpoint_c": dewpoint, "target_c": None if self.demo_mode else dewpoint + self.demo_margin,
                 "plate_c": [24.1 + math.sin(elapsed / 13 + index) * 0.35 for index in range(3)],
                 "current_a_nominal": [round(duty * current, 2) for current in (9, 3, 2.8)],
+                "current_limits_a": [40, 9, 9], "current_limits_commissioned_mask": 7,
                 "applied_duty": [duty] * 3, "desired_duty": [duty] * 3,
                 "active_faults": [0] * 3, "sht31_errors": 0, "ads1220_errors": 0, "valid_flags": 63}
         self._accept_status(data)
@@ -531,6 +542,8 @@ class Dashboard:
             widget.configure(text=text, font=("Segoe UI", 22 if text == "Bypassed" else 27, "bold"),
                              fg=COLORS["muted"] if not active else COLORS["accent" if index == 3 else "text"])
         for index, (status_label, widgets) in enumerate(self.channel_values):
+            self.current_trip_values[index].configure(text=current_trip_label(sample, index),
+                                                      fg=COLORS["muted"] if not active else COLORS["amber"])
             status_label.configure(text=channel_status(sample, index, self.connected or demo, now) if sample else "No device reading",
                                    fg=COLORS["muted"] if not active else COLORS["amber"] if sample.outputs_locked_off or sample.faults[index] else COLORS["accent"])
             numbers = (sample.plate_c[index], sample.current_a[index], sample.applied_duty[index], sample.desired_duty[index]) if sample else (None,) * 4

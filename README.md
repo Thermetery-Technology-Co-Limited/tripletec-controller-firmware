@@ -2,6 +2,8 @@
 
 Firmware and a desktop GUI for the STM32F103RCT6 cooler controller. Regulated mode uses **target = max(0°C, dew point + 3°C)** by default. Unregulated mode requests maximum cooling and deliberately bypasses the dew-point target. The current bench image measures and reports sensors while holding all three TEC control pins LOW; selecting a mode cannot enable the power stage.
 
+Version 0.3.0 adds direct USB CDC control and a USB-first desktop connection option. The USB firmware is flashed, the clocks and SWD fallback are verified, but direct USB enumeration remains unverified: no STM32 USB device appears even after a known data-cable replug. The schematic omits the required external D+ pull-up. Keep the Pico connected until the hardware requirement and USB-only tests in [USB_CONTROL.md](USB_CONTROL.md) are complete.
+
 ## Desktop GUI
 
 ```powershell
@@ -14,7 +16,7 @@ XT60 channels 2/3 now have a selected **9A software trip threshold**, displayed 
 
 Unregulated mode bypasses condensation protection and the regulated 0°C target floor. With commissioned hardware it ramps toward 100% duty without PI regulation; fresh sensor readings, valid calibrated currents, commissioned per-channel current limits, hardware verification, and operating-temperature limits still apply. It can cause condensation. The current bench firmware cannot energize TECs in either mode.
 
-`python -m gui --demo` runs an explicitly labeled simulation without touching hardware. Live monitoring and commands use the existing Pico SWD connection; no UART wiring is required. The GUI waits for firmware acknowledgement before showing a change as applied, and keeps hardware work outside the UI thread.
+`python -m gui --demo` runs an explicitly labeled simulation without touching hardware. The desktop offers Auto (USB first), STM32 USB-C and Pico SWD. Auto selects USB when a matching device is present, otherwise SWD at initial connection; it never switches transport after an uncertain command. Use `python -m gui --transport usb --connect` for a USB-only check, or `--transport swd` for the Pico. Source USB use requires `python -m pip install -r requirements-desktop.txt`; the packaged application includes it. No UART wiring is required. The GUI waits for acknowledgement before showing a change as applied and keeps hardware work outside the UI thread.
 
 To build a Windows executable with Python/Tk bundled:
 
@@ -23,9 +25,11 @@ python scripts/build.py all
 python scripts/package_gui.py
 ```
 
-Launch `build/gui/TripleTEC-Control.exe`. OpenOCD must be installed and available on PATH. The executable includes the matching firmware symbol metadata; rebuild it after changing the firmware memory layout. `--smoke-test` checks the window can be created and closed without hardware access.
+Launch `build/gui/TripleTEC-Control.exe`. OpenOCD must be installed on PATH for Pico SWD; direct USB does not use it. The executable includes matching SWD symbol metadata, so rebuild it after changing the firmware memory layout. `--smoke-test` checks the window can be created and closed without hardware access.
 
 Use one host process per Pico probe. Close the GUI before flashing or running the diagnostic CLI. `python scripts/check_gui_link.py` performs an output-locked command check and restores regulated mode with a 3°C margin. Test evidence is recorded in [VALIDATION_GUI.md](VALIDATION_GUI.md).
+
+Likewise, use one client per USB COM port. `python -m scripts.check_usb_link --list` lists only the STM32 development USB identity. The same command without `--list` performs a USB-only output-locked command check, with no SWD fallback. See [VALIDATION_USB.md](VALIDATION_USB.md) for the current physical verification limits.
 
 ### Powered board, TECs disconnected
 
@@ -52,7 +56,7 @@ python scripts/read_status.py
 
 Individual targets are `host` and `firmware`. Override compilers with `--cc` or `--arm-cc`. Do not add `-ffast-math`: fault handling depends on standard NaN/Inf semantics.
 
-The image is `build/stm32/tripletec-bench.elf`, with matching `.bin`, `.hex`, map, and telemetry-symbol JSON. Build output is ignored by Git. The source uses C11, newlib/libm, and a small register-level board layer; there is no external HAL dependency or RTOS.
+The image is `build/stm32/tripletec-bench.elf`, with matching `.bin`, `.hex`, map, and telemetry-symbol JSON. Build output is ignored by Git. Application source uses C11, newlib/libm and a register-level board layer; pinned TinyUSB device/CDC sources use GNU C11, with CMSIS register headers. No HAL, dynamic allocator or RTOS is used. Third-party sources, licenses and hashes are included under [third_party/](third_party/README.md).
 
 ## What is implemented
 
@@ -65,6 +69,7 @@ The image is `build/stm32/tripletec-bench.elf`, with matching `.bin`, `.hex`, ma
 - Nominal 100kΩ/B3950 thermistor conversion, open/short/range detection, and nominal per-channel ACS725 current conversion.
 - Safe pin initialization before C runtime startup, watchdog, fault handler, and read-only live telemetry through the existing Pico SWD connection.
 - A CRC-checked RAM command mailbox with sequence/acknowledgement handling for mode, margin, stop, arm and heartbeat commands. The bench image accepts settings but rejects arm commands. A two-second host lease disarms any future enabled channels after loss of communication.
+- Direct USB CDC with bounded packet framing, CRC/sequence validation, fixed buffers, no command replay, and session-change disarming. USB STATUS never renews the host lease. Both USB and SWD reach the same output-locked command handler.
 
 The bench application always sets `hardware_verified=false`, never arms the controller, never configures PWM alternate-function outputs, and repeatedly forces PA1/PA2/PA3 LOW. The control library is exercised with simulated inputs in native tests; simulated measurements are never substituted into live board readings.
 
@@ -81,7 +86,7 @@ The bench application always sets `hardware_verified=false`, never arms the cont
 | Button | PB0, active LOW |
 | Debug | PA13 SWDIO, PA14 SWCLK through Pico CMSIS-DAP |
 
-The board has a 12MHz crystal; this first image deliberately runs on the internal 8MHz HSI. It does not depend on the crystal or USB clock. HSI tolerance applies to UART baud accuracy.
+The 12MHz HSE crystal now feeds PLL x6: SYSCLK/APB2 72MHz, APB1 36MHz, ADC 12MHz and USB 48MHz. SysTick, UART, I2C, SPI and bounded peripheral waits follow the active clocks. If HSE/PLL startup fails, a bounded fallback keeps sensor/SWD operation on 8MHz HSI and refuses USB initialization. HSI tolerance then applies to UART baud accuracy.
 
 The three 8-pin connectors on the power board supply 12V. The separate MCU/power-board harness is 10 pins. USB powers the MCU-side 3.3V system; no 12V input is needed for the onboard SHT31 and ADS1220. Thermistor measurements require the thermistors to be physically connected to their two-pin headers.
 
@@ -93,7 +98,7 @@ The output stage is a low-side NMOS switch per channel, supporting cooling in th
 
 UART prints status every second and accepts `status` and `help`. Missing values use `INT32_MIN`; temperatures are printed in milli-degrees, RH in milli-percent. Pico's COM3 belongs to the probe UART bridge: MCU USART1 data only reaches it if the Pico UART pins are actually wired to the MCU header. SWD telemetry requires no UART wiring.
 
-The MCU USB schematic has no explicit 1.5kΩ D+ pullup, so direct USB CDC is not included in this image.
+The MCU USB schematic has no explicit 1.5kΩ D+ pull-up. Direct CDC is implemented, but the assembled board must provide that resistor from D+ to 3.3V; GPIO pull-ups are not a substitute. See [USB_CONTROL.md](USB_CONTROL.md). The prototype USB VID/PID is `CAFE:4001`, with a serial descriptor derived from the STM32 UID; a product needs an assigned identity.
 
 Telemetry `valid_flags`: bit 0 fresh ambient sample; bit 1 verified ADS configuration; bits 2/3/4 fresh plate temperatures; bit 5 valid current ADC acquisition. These indicate acquisition validity, not calibration or permission to cool. `active_faults=2` is the intentional hardware gate in the bench image; other bits are defined in `core/controller.h`. Applied duty is always zero.
 

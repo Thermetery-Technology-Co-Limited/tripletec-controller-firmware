@@ -1,0 +1,2 @@
+# Keep upstream source/license bytes stable on Windows for SHA-256 verification.
+* text eol=lf

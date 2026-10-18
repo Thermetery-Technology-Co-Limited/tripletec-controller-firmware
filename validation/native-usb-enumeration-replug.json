@@ -1,0 +1,13 @@
+{
+  "after_data_cable_replug": true,
+  "serial_ports": [
+    {
+      "device": "COM3",
+      "description": "USB Serial Device (COM3)",
+      "vid": 11914,
+      "pid": 12,
+      "serial": "E66598541B21AE38"
+    }
+  ],
+  "stm32_usb_devices": []
+}

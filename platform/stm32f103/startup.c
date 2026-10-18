@@ -12,6 +12,8 @@ extern int main(void);
 void Reset_Handler(void);
 void Default_Handler(void);
 void SysTick_Handler(void);
+void USB_HP_CAN1_TX_IRQHandler(void);
+void USB_LP_CAN1_RX0_IRQHandler(void);
 
 typedef void (*handler_t)(void);
 
@@ -29,7 +31,10 @@ const handler_t vector_table[76] = {
     [12] = Default_Handler, /* DebugMonitor */
     [14] = Default_Handler, /* PendSV */
     [15] = SysTick_Handler,
-    [16 ... 75] = Default_Handler
+    [16 ... 34] = Default_Handler,
+    [35] = USB_HP_CAN1_TX_IRQHandler, /* external IRQ19 */
+    [36] = USB_LP_CAN1_RX0_IRQHandler, /* external IRQ20 */
+    [37 ... 75] = Default_Handler
 };
 
 void Reset_Handler(void)

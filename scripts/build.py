@@ -36,12 +36,16 @@ def host(cc: str) -> None:
         "control": ["core/dewpoint.c", "core/controller.c"],
         "modes": ["core/dewpoint.c", "core/controller.c"],
         "protocol": ["app/control_protocol.c"],
+        "usb_protocol": ["app/usb_protocol.c"],
+        "usb_descriptors": ["platform/stm32f103/usb_descriptors.c"],
         "sensors": sorted(str(p.relative_to(ROOT)) for p in (ROOT / "sensors").glob("*.c")),
     }
     for name, sources in groups.items():
         binary = output / (f"test_{name}.exe" if os.name == "nt" else f"test_{name}")
+        extra = (["-Iplatform/stm32f103", "-Ithird_party/tinyusb/src", "-DSTM32F103xE"]
+                 if name == "usb_descriptors" else [])
         run([cc, "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror", "-pedantic",
-             "-Icore", "-Isensors", "-Iapp", *sources, f"tests/test_{name}.c", "-lm", "-o", binary])
+             "-Icore", "-Isensors", "-Iapp", *extra, *sources, f"tests/test_{name}.c", "-lm", "-o", binary])
         run([binary])
     run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py"])
 
@@ -51,14 +55,24 @@ def firmware(cc: str) -> None:
     output.mkdir(parents=True, exist_ok=True)
     sources = sorted(p for folder in ("core", "sensors", "app", "platform/stm32f103")
                      for p in (ROOT / folder).glob("*.c"))
-    flags = ["-mcpu=cortex-m3", "-mthumb", "-std=c11", "-Os", "-g3",
+    flags = ["-mcpu=cortex-m3", "-mthumb", "-Os", "-g3",
              "-ffunction-sections", "-fdata-sections", "-fno-common", "-ffreestanding",
-             "-Wall", "-Wextra", "-Werror", "-DBENCH_OUTPUT_LOCK=1",
-             "-Icore", "-Isensors", "-Iapp", "-Iplatform/stm32f103"]
+             "-Wall", "-Wextra", "-Werror", "-DBENCH_OUTPUT_LOCK=1", "-DSTM32F103xE",
+             "-Icore", "-Isensors", "-Iapp", "-Iplatform/stm32f103",
+             "-Ithird_party/tinyusb/src", "-Ithird_party/cmsis_core/Include",
+             "-Ithird_party/cmsis_stm32f1/Include"]
+    vendor_sources = [
+        "third_party/tinyusb/src/tusb.c", "third_party/tinyusb/src/common/tusb_fifo.c",
+        "third_party/tinyusb/src/device/usbd.c", "third_party/tinyusb/src/class/cdc/cdc_device.c",
+        "third_party/tinyusb/src/portable/st/stm32_fsdev/dcd_stm32_fsdev.c",
+        "third_party/tinyusb/src/portable/st/stm32_fsdev/fsdev_common.c",
+    ]
+    sources.extend(ROOT / name for name in vendor_sources)
     objects = []
     for source in sources:
         obj = output / ("_".join(source.relative_to(ROOT).parts) + ".o")
-        run([cc, *flags, "-c", source, "-o", obj])
+        dialect = "-std=gnu11" if "third_party" in source.parts else "-std=c11"
+        run([cc, *flags, dialect, "-c", source, "-o", obj])
         objects.append(obj)
     elf = output / "tripletec-bench.elf"
     run([cc, "-mcpu=cortex-m3", "-mthumb", "-nostartfiles", "--specs=nano.specs",

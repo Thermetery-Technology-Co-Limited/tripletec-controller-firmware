@@ -20,6 +20,14 @@ def runtime_notices(destination: Path) -> None:
     installer_license = next(distribution.locate_file(item) for item in distribution.files
                              if str(item).endswith("licenses/COPYING.txt"))
     shutil.copyfile(installer_license, destination / "PyInstaller-COPYING.txt")
+    serial_distribution = importlib.metadata.distribution("pyserial")
+    serial_license = next((serial_distribution.locate_file(item) for item in serial_distribution.files
+                           if str(item).lower().endswith("license.txt")), None)
+    if serial_license is None:
+        if serial_distribution.version != "3.5":
+            raise SystemExit("pyserial license absent from wheel; provide the matching upstream license before packaging")
+        serial_license = ROOT / "third_party/pyserial/LICENSE.txt"
+    shutil.copyfile(serial_license, destination / "pyserial-LICENSE.txt")
     for component in ("tcl", "tk"):
         archives = sorted((python_root / "tcl").glob(f"lib{component}*.zip"))
         if archives:
@@ -51,6 +59,8 @@ def main() -> None:
                "--windowed", "--name", "TripleTEC-Control", "--paths", str(ROOT),
                "--version-file", str(ROOT / "packaging/windows-version.txt"),
                "--hidden-import", "scripts.device_link", "--hidden-import", "scripts.read_status",
+               "--hidden-import", "scripts.usb_link", "--hidden-import", "serial.tools.list_ports",
+               "--hidden-import", "serial.tools.list_ports_windows",
                "--distpath", str(output), "--workpath", str(work), "--specpath", str(work),
                "--add-data", f"{metadata}:build/stm32", "--add-data", f"{ROOT / 'COPYRIGHT'}:.",
                "--add-data", f"{notices}:licenses",

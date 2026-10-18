@@ -1,0 +1,64 @@
+{
+  "wall_elapsed_s": 6.250101650000943,
+  "firmware_elapsed_s": 6.25,
+  "ratio": 0.9999837362643625,
+  "note": "Coarse live timebase sanity check, affected by 250ms publication quantization and SWD read timing; not oscillator metrology.",
+  "samples": [
+    {
+      "midpoint_s": 6128.111255649999,
+      "uptime_ms": 254947,
+      "sequence": 2044,
+      "sht_errors": 0,
+      "ads_errors": 0,
+      "adc_errors": 0,
+      "outputs_locked_off": true,
+      "applied_duty": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "midpoint_s": 6130.19701815,
+      "uptime_ms": 257197,
+      "sequence": 2062,
+      "sht_errors": 0,
+      "ads_errors": 0,
+      "adc_errors": 0,
+      "outputs_locked_off": true,
+      "applied_duty": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "midpoint_s": 6132.2788479,
+      "uptime_ms": 259197,
+      "sequence": 2078,
+      "sht_errors": 0,
+      "ads_errors": 0,
+      "adc_errors": 0,
+      "outputs_locked_off": true,
+      "applied_duty": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "midpoint_s": 6134.3613573,
+      "uptime_ms": 261197,
+      "sequence": 2094,
+      "sht_errors": 0,
+      "ads_errors": 0,
+      "adc_errors": 0,
+      "outputs_locked_off": true,
+      "applied_duty": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    }
+  ]
+}

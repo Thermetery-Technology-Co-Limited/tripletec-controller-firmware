@@ -6,7 +6,7 @@
 #include <stdint.h>
 
 /* Bench image: PA1/PA2/PA3 stay GPIO LOW; TIM2 never drives the TECs. */
-#define BOARD_CORE_CLOCK_HZ 8000000u
+#define BOARD_CORE_CLOCK_HZ 72000000u /* HSE 12 MHz x6 when USB clock is ready */
 #define BOARD_UART_BAUD 115200u
 #define BOARD_TEC_OUTPUTS_LOCKED_OFF 1
 
@@ -15,9 +15,11 @@ void board_early_safe_init(void);
 void board_init(void);
 void board_outputs_force_off(void);
 uint32_t board_millis(void);
+uint32_t board_core_clock_hz(void);
+bool board_usb_clock_ready(void); /* false on bounded HSE/PLL fallback to HSI */
 void board_delay_ms(uint32_t duration_ms);
 
-/* USART1: PA9 TX, PA10 RX, 115200 8N1, HSI clock accuracy applies. */
+/* USART1: PA9 TX, PA10 RX, 115200 8N1; uses the active APB2 clock. */
 void board_uart_write(const char *text);
 void board_uart_write_bytes(const uint8_t *data, size_t length);
 bool board_uart_read_nonblocking(uint8_t *received);
@@ -28,7 +30,7 @@ bool board_i2c_write(uint8_t address, const uint8_t *data, size_t length,
 bool board_i2c_read(uint8_t address, uint8_t *data, size_t length,
                     uint32_t timeout_ms);
 
-/* SPI1: PA5/PA6/PA7, mode 1, 250 kHz; PA4 is software chip select. */
+/* SPI1: PA5/PA6/PA7, mode 1, <=281.25 kHz; PA4 is software chip select. */
 bool board_spi_transfer(const uint8_t *transmit, uint8_t *receive, size_t length,
                         uint32_t timeout_ms);
 void board_ads1220_cs(bool selected);

@@ -3,8 +3,9 @@ Copyright (c) 2026 Thermetery Technology Co., Limited
 
 All rights reserved.
 
-The firmware, tests, and original documentation in this repository are
+The original application firmware, desktop application, tests and documentation are
 proprietary. No open-source license is granted.
 
-Third-party specifications and tool notices retain their respective ownership
-and are not relicensed by this notice.
+Third-party library sources, headers, runtime components, specifications and
+tool notices retain their respective ownership and licenses. They are not
+relicensed by this notice; see THIRD_PARTY_NOTICES.md and third_party/README.md.

@@ -6,6 +6,8 @@
 #include "ads1220.h"
 #include "ntc.h"
 #include "current.h"
+#include "usb_device.h"
+#include "usb_protocol.h"
 
 #include <limits.h>
 #include <math.h>
@@ -42,6 +44,13 @@ static uint32_t adc_errors;
 static uint32_t sht_errors;
 static uint32_t ads_errors;
 static uint32_t loop_count;
+static usb_protocol_t usb_protocol;
+static bool usb_enabled;
+static bool usb_was_connected;
+static uint32_t usb_session_generation;
+static uint8_t usb_input[128];
+static size_t usb_input_used;
+static size_t usb_input_offset;
 
 static bool sht_write(void *context, uint8_t address, const uint8_t *data, size_t count)
 {
@@ -201,6 +210,85 @@ static control_result_t apply_command(void *context, uint32_t opcode,
     }
 }
 
+static control_result_t usb_apply(void *context, uint8_t opcode,
+                                  int32_t value, uint32_t sequence)
+{
+    (void)context;
+    (void)sequence; /* USB response sequence is independent of the SWD mailbox. */
+    if (!usb_device_connected() ||
+        usb_device_session_generation() != usb_session_generation) {
+        disarm_all();
+        return CONTROL_INTERLOCK;
+    }
+    const uint32_t now = board_millis();
+    command_protocol.last_valid_ms = now; /* Only validated non-STATUS requests call this. */
+    const control_result_t result = apply_command(NULL, opcode, value, now);
+    tec_controller_step(&controller, &inputs, now, &outputs);
+    return result;
+}
+
+static void copy_volatile_bytes(uint8_t *destination, volatile const void *source, size_t count)
+{
+    volatile const uint8_t *bytes = source;
+    for (size_t i = 0U; i < count; ++i) {
+        destination[i] = bytes[i];
+    }
+}
+
+static void usb_snapshot(void *context, uint8_t payload[USB_PROTOCOL_PAYLOAD_SIZE])
+{
+    (void)context;
+    /* The publisher and this callback both run exclusively in main context.
+     * USB interrupts only enqueue stack events; they do not touch controller state.
+     */
+    publish(board_millis());
+    _Static_assert(sizeof(g_telemetry) + sizeof(g_adc_diagnostics) +
+                   sizeof(g_limit_configuration) == USB_PROTOCOL_PAYLOAD_SIZE,
+                   "USB telemetry frame changed");
+    copy_volatile_bytes(payload, &g_telemetry, sizeof(g_telemetry));
+    copy_volatile_bytes(payload + sizeof(g_telemetry), &g_adc_diagnostics,
+                        sizeof(g_adc_diagnostics));
+    copy_volatile_bytes(payload + sizeof(g_telemetry) + sizeof(g_adc_diagnostics),
+                        &g_limit_configuration, sizeof(g_limit_configuration));
+}
+
+static bool usb_enqueue(void *context, const uint8_t *bytes, size_t length)
+{
+    (void)context;
+    return usb_device_write_packet(bytes, length);
+}
+
+static void usb_service(void)
+{
+    if (!usb_enabled) {
+        return;
+    }
+    usb_device_task();
+    const uint32_t generation = usb_device_session_generation();
+    const bool connected = usb_device_connected();
+    if (generation != usb_session_generation || (usb_was_connected && !connected)) {
+        usb_session_generation = generation;
+        disarm_all();
+        usb_input_used = 0U;
+        usb_input_offset = 0U;
+        usb_protocol_init(&usb_protocol, usb_apply, usb_snapshot, usb_enqueue, NULL);
+        tec_controller_step(&controller, &inputs, board_millis(), &outputs);
+        publish(board_millis());
+    }
+    usb_was_connected = connected;
+    if (!connected || !usb_protocol_poll(&usb_protocol)) {
+        return;
+    }
+    if (usb_input_offset == usb_input_used) {
+        usb_input_used = usb_device_read(usb_input, sizeof(usb_input));
+        usb_input_offset = 0U;
+    }
+    if (usb_input_offset < usb_input_used) {
+        usb_input_offset += usb_protocol_feed(&usb_protocol, usb_input + usb_input_offset,
+                                               usb_input_used - usb_input_offset);
+    }
+}
+
 static void print_status(void)
 {
     char text[256];
@@ -265,6 +353,9 @@ int main(void)
     board_watchdog_start();
     tec_controller_step(&controller, &inputs, board_millis(), &outputs);
     publish(board_millis());
+    usb_protocol_init(&usb_protocol, usb_apply, usb_snapshot, usb_enqueue, NULL);
+    usb_enabled = usb_device_init();
+    usb_session_generation = usb_device_session_generation();
     board_uart_write("TripleTECDriver bench firmware: dew point +3C; outputs permanently OFF.\r\n");
 
     for (;;) {
@@ -383,6 +474,7 @@ int main(void)
             print_status();
         }
         uart_commands();
+        usb_service();
         board_outputs_force_off();
         board_watchdog_feed();
         board_delay_ms(1U);

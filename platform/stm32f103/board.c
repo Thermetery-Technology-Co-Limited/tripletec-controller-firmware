@@ -2,7 +2,8 @@
 
 /* STM32F103 register layout and I2C receive sequences: ST RM0008, rev. 21.
  * ADS1220 SPI mode 1: TI SBAS501C, section 8.5.1.
- * No vendor startup, HAL, dynamic allocation, or external oscillator required.
+ * No vendor startup, HAL or dynamic allocation. Direct USB requires HSE;
+ * bounded HSI fallback preserves sensor/debug operation if it is unavailable.
  */
 #define REG32(address) (*(volatile uint32_t *)(uintptr_t)(address))
 #define BIT(n) (UINT32_C(1) << (n))
@@ -74,6 +75,10 @@
 
 static volatile uint32_t milliseconds;
 static bool adc_ready;
+/* CMSIS/TinyUSB consume this value; peripheral rates also use it at runtime. */
+uint32_t SystemCoreClock = 8000000u;
+static uint32_t apb1_clock_hz = 8000000u;
+static bool usb_clock_ready;
 
 /* The iteration limit also terminates waits if SysTick is unavailable.
  * Normal peripheral waits allow interrupts and use elapsed milliseconds,
@@ -94,7 +99,7 @@ static deadline_t deadline_begin(uint32_t timeout_ms)
     }
     deadline.started = board_millis();
     deadline.timeout = timeout_ms;
-    deadline.remaining_polls = (timeout_ms + 1u) * 8000u;
+    deadline.remaining_polls = (timeout_ms + 1u) * (SystemCoreClock / 1000u);
     return deadline;
 }
 
@@ -150,11 +155,12 @@ void board_outputs_force_off(void)
 
 static void i2c_configure(void)
 {
+    const uint32_t mhz = apb1_clock_hz / 1000000u;
     I2C1_CR1 = 0u;
-    I2C1_CR2 = 8u;      /* APB1 in MHz. */
+    I2C1_CR2 = mhz;
     I2C1_OAR1 = BIT(14); /* RM0008 requires bit 14 to remain set. */
-    I2C1_CCR = 40u;     /* 8 MHz / (2 * 100 kHz). */
-    I2C1_TRISE = 9u;    /* Standard mode: APB1 MHz + 1. */
+    I2C1_CCR = apb1_clock_hz / 200000u;
+    I2C1_TRISE = mhz + 1u;
     I2C1_CR1 = I2C_PE;
 }
 
@@ -169,26 +175,85 @@ static void i2c_abort(void)
     i2c_configure();
 }
 
+static bool clock_bits(uint32_t mask, bool set)
+{
+    for (uint32_t polls = 0u; polls < 1000000u; ++polls) {
+        if (((RCC_CR & mask) != 0u) == set) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void clocks_configure(void)
+{
+    SystemCoreClock = 8000000u;
+    apb1_clock_hz = 8000000u;
+    usb_clock_ready = false;
+    RCC_CR |= BIT(0); /* Preserve factory HSI trim for fallback/recovery. */
+    if (!clock_bits(BIT(1), true)) {
+        for (;;) { board_outputs_force_off(); }
+    }
+    RCC_CFGR &= ~UINT32_C(3);
+    bool switched = false;
+    for (uint32_t polls = 0u; polls < 1000000u; ++polls) {
+        if ((RCC_CFGR & UINT32_C(0x0c)) == 0u) {
+            switched = true;
+            break;
+        }
+    }
+    if (!switched) {
+        for (;;) { board_outputs_force_off(); }
+    }
+    RCC_CR &= ~(BIT(24) | BIT(19)); /* PLL and CSS off before reconfiguration. */
+    if (!clock_bits(BIT(25), false)) {
+        for (;;) { board_outputs_force_off(); }
+    }
+    RCC_CFGR = 0u;
+    FLASH_ACR = BIT(4); /* HSI 8 MHz, zero wait states. */
+    RCC_CR &= ~BIT(16);
+    if (!clock_bits(BIT(17), false)) {
+        return;
+    }
+    RCC_CR &= ~BIT(18); /* HSEBYP can change only while HSE is disabled. */
+    RCC_CR |= BIT(16);
+    if (!clock_bits(BIT(17), true)) {
+        RCC_CR &= ~BIT(16);
+        return; /* Keep all diagnostics available over SWD on HSI. */
+    }
+    /* HSE 12MHz x6 -> SYSCLK/APB2 72MHz, APB1 divided by2 ->36MHz,
+     * ADC divided by6 ->12MHz.
+     * USBPRE=0 supplies PLL/1.5=48MHz, per RM0008 section 7.3.2.
+     * Set flash latency before raising SYSCLK.
+     */
+    FLASH_ACR = BIT(4) | 2u;
+    RCC_CFGR = BIT(16) | (4u << 18) | (4u << 8) | (2u << 14);
+    RCC_CR |= BIT(24);
+    if (!clock_bits(BIT(25), true)) {
+        RCC_CR &= ~BIT(24);
+        RCC_CFGR = 0u;
+        FLASH_ACR = BIT(4);
+        return;
+    }
+    RCC_CFGR = (RCC_CFGR & ~UINT32_C(3)) | 2u;
+    for (uint32_t polls = 0u; polls < 1000000u; ++polls) {
+        if ((RCC_CFGR & UINT32_C(0x0c)) == UINT32_C(0x08)) {
+            SystemCoreClock = BOARD_CORE_CLOCK_HZ;
+            apb1_clock_hz = BOARD_CORE_CLOCK_HZ / 2u;
+            usb_clock_ready = true;
+            return;
+        }
+    }
+    /* The clock switch did not complete. Never run incorrectly timed I/O. */
+    for (;;) { board_outputs_force_off(); }
+}
+
 void board_init(void)
 {
     deadline_t deadline;
     board_early_safe_init();
 
-    RCC_CR |= BIT(0); /* HSI enabled, preserve factory trim. */
-    for (uint32_t polls = 0u; (RCC_CR & BIT(1)) == 0u; ++polls) {
-        if (polls == 1000000u) {
-            for (;;) { /* Clock unavailable; outputs remain LOW. */ }
-        }
-    }
-    RCC_CFGR &= ~UINT32_C(3); /* SYSCLK = HSI. */
-    for (uint32_t polls = 0u; (RCC_CFGR & UINT32_C(0x0c)) != 0u; ++polls) {
-        if (polls == 1000000u) {
-            for (;;) { }
-        }
-    }
-    RCC_CFGR = 0u; /* AHB/APB1/APB2 = HSI, ADC clock = HSI/2. */
-    RCC_CR &= ~(BIT(16) | BIT(18) | BIT(24)); /* HSE/CSS/PLL unused. */
-    FLASH_ACR = BIT(4); /* 0 wait states at 8 MHz; prefetch enabled. */
+    clocks_configure();
 
     RCC_APB2ENR |= BIT(0) | BIT(2) | BIT(3) | BIT(4) | BIT(9) | BIT(12) | BIT(14);
     RCC_APB1ENR |= BIT(21);
@@ -210,24 +275,25 @@ void board_init(void)
     milliseconds = 0u;
     SCB_VTOR = UINT32_C(0x08000000);
     SYST_CSR = 0u;
-    SYST_RVR = BOARD_CORE_CLOCK_HZ / 1000u - 1u;
+    SYST_RVR = SystemCoreClock / 1000u - 1u;
     SYST_CVR = 0u;
     SYST_CSR = BIT(2) | BIT(1) | BIT(0);
 
     USART1_CR1 = 0u;
     USART1_CR2 = 0u;
     USART1_CR3 = 0u;
-    USART1_BRR = (BOARD_CORE_CLOCK_HZ + BOARD_UART_BAUD / 2u) / BOARD_UART_BAUD;
+    USART1_BRR = (SystemCoreClock + BOARD_UART_BAUD / 2u) / BOARD_UART_BAUD;
     USART1_CR1 = BIT(13) | BIT(3) | BIT(2);
 
     SPI1_CR1 = 0u;
     SPI1_CR2 = 0u;
-    SPI1_CR1 = BIT(0) | BIT(2) | (4u << 3) | BIT(6) | BIT(8) | BIT(9);
+    SPI1_CR1 = BIT(0) | BIT(2) | ((usb_clock_ready ? 7u : 4u) << 3) |
+               BIT(6) | BIT(8) | BIT(9);
     i2c_configure();
 
     ADC1_CR1 = 0u;
-    /* Channels 10/11/12 and internal channel 17: 239.5 cycles at 4 MHz,
-     * or 59.875 us. ST F103xC/D/E datasheet Table 13 requires up to 17.1 us
+    /* Channels 10/11/12 and internal channel 17: 239.5 cycles at <=12 MHz,
+     * or >=19.96 us. ST F103xC/D/E datasheet Table 13 requires up to 17.1 us
      * when sampling VREFINT. RM0008 maps that reference to ADC1_IN17.
      */
     ADC1_SMPR1 = 7u | (7u << 3) | (7u << 6) | (7u << 21);
@@ -259,6 +325,16 @@ void SysTick_Handler(void)
 uint32_t board_millis(void)
 {
     return milliseconds;
+}
+
+uint32_t board_core_clock_hz(void)
+{
+    return SystemCoreClock;
+}
+
+bool board_usb_clock_ready(void)
+{
+    return usb_clock_ready;
 }
 
 void board_delay_ms(uint32_t duration_ms)
@@ -336,10 +412,10 @@ static bool i2c_wait_final_btf(void)
 {
     /* ES0340 section 2.9.2 requires masking from read N-2 through STOP/read N-1.
      * At 100 kHz the last non-stretched byte takes about 90 us. A fixed bound
-     * of 1024 register polls allows that byte but limits a stuck/stretched bus
-     * to a few milliseconds at HSI 8 MHz, independently of masked SysTick.
+     * scaled from 1024 register polls at HSI8 allows that byte at either core
+     * rate and bounds a stuck/stretched bus independently of masked SysTick.
      */
-    for (uint32_t polls = 0u; polls < 1024u; ++polls) {
+    for (uint32_t polls = 0u; polls < 1024u * (SystemCoreClock / 8000000u); ++polls) {
         const uint32_t status = I2C1_SR1;
         if ((status & I2C_ERRORS) != 0u) {
             return false;

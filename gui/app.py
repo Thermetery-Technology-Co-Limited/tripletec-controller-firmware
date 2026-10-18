@@ -1,4 +1,4 @@
-"""Threaded Tk desktop for the TripleTECDriver's acknowledged SWD protocol."""
+"""Threaded Tk desktop for acknowledged STM32 USB and Pico SWD links."""
 from __future__ import annotations
 
 import argparse
@@ -20,11 +20,31 @@ COLORS = {"bg": "#0C121B", "panel": "#151E2B", "raised": "#1C2838",
           "line": "#2A384B", "text": "#EAF1FA", "muted": "#8C9EB7",
           "accent": "#51DAC4", "blue": "#79B8FF", "amber": "#F4C77A",
           "red": "#FF828C", "purple": "#BCABFF"}
+SOURCES = {"Auto (USB first)": "auto", "STM32 USB-C": "usb", "Pico SWD": "swd"}
 
 
 def resource_root() -> Path:
     """Resolve optional bundled assets without depending on the launch folder."""
     return Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1]))
+
+
+def open_link(settings):
+    """Choose once at connection time; never change transport after a command."""
+    from scripts.device_link import DeviceLink
+    from scripts.usb_link import UsbLink, list_usb_devices
+    transport = settings.get("transport", "auto")
+    if transport not in ("auto", "usb", "swd"):
+        raise RuntimeError("Unsupported connection transport")
+    if transport == "auto":
+        try:
+            devices = list_usb_devices()
+        except RuntimeError:
+            devices = []
+        transport = "usb" if devices else "swd"
+    if transport == "usb":
+        return UsbLink(port=settings.get("port") or None,
+                       serial_number=settings.get("usb_serial") or None), "usb"
+    return DeviceLink(root=None, serial=settings.get("serial") or None), "swd"
 
 
 class LinkWorker(threading.Thread):
@@ -38,6 +58,16 @@ class LinkWorker(threading.Thread):
         self.generation = 0
         self.lock = threading.Lock()
         self.link = None
+        self.transport = None
+
+    def _close_link(self):
+        link, self.link = self.link, None
+        self.transport = None
+        if link is not None and hasattr(link, "close"):
+            link.close()
+
+    def shutdown(self):
+        self.submit(self.generation, "shutdown", priority=-1)
 
     def invalidate(self, generation):
         with self.lock:
@@ -49,18 +79,21 @@ class LinkWorker(threading.Thread):
     def run(self):
         while True:
             _, _, generation, kind, payload = self.jobs.get()
+            if kind == "shutdown":
+                self._close_link()
+                return
             with self.lock:
                 current = self.generation
             if generation != current:
                 continue
             if kind == "disconnect":
-                self.link = None
+                self._close_link()
                 continue
             try:
                 if kind == "connect":
-                    # Late import allows offline/demo launches without the backend.
-                    from scripts.device_link import DeviceLink
-                    self.link = DeviceLink(root=None, serial=payload or None)
+                    # Late imports keep offline/demo launches independent of USB.
+                    self._close_link()
+                    self.link, self.transport = open_link(payload)
                     result = self.link.read_status()
                 elif kind == "poll":
                     if self.link is None:
@@ -79,13 +112,17 @@ class LinkWorker(threading.Thread):
                         continue
                 else:
                     continue
+                result.setdefault("transport", self.transport)
                 self.events.put((generation, "status", (kind, result)))
             except Exception as error:
+                if kind == "connect":
+                    self._close_link()
                 self.events.put((generation, "error", (kind, str(error))))
 
 
 class Dashboard:
-    def __init__(self, root: tk.Tk, *, demo=False, connect=False, serial=None):
+    def __init__(self, root: tk.Tk, *, demo=False, connect=False, serial=None,
+                 transport="auto", port=None):
         self.root = root
         self.root.title("TripleTECControl · Thermal control")
         self.root.geometry("1100x760")
@@ -108,14 +145,18 @@ class Dashboard:
         self.demo_mode = 0
         self.demo_margin = 3.0
         self.demo_armed = False
-        self.source = tk.StringVar(value="Demo (simulated)" if demo else "Live hardware")
+        selected_source = next((label for label, kind in SOURCES.items() if kind == transport), "Auto (USB first)")
+        self.source = tk.StringVar(value="Demo (simulated)" if demo else selected_source)
         self.serial = tk.StringVar(value=serial or "")
+        self.port = tk.StringVar(value=port or "")
+        self.usb_serial = tk.StringVar(value="")
+        self.active_transport = None
         self.mode = tk.IntVar(value=0)
         self.margin = tk.StringVar(value="3.0")
         self.connection_text = tk.StringVar(value="DISCONNECTED")
-        self.detail_text = tk.StringVar(value="Connect through the Pico SWD probe to read the controller.")
+        self.detail_text = tk.StringVar(value="Connect using controller USB-C or the Pico SWD probe.")
         self.reported_mode = tk.StringVar(value="DEVICE MODE  —")
-        self.message = tk.StringVar(value="Ready. Live connection requires OpenOCD on PATH and the Pico connected.")
+        self.message = tk.StringVar(value="Ready. Auto tries STM32 USB-C first, then Pico SWD when no USB device is present.")
         self.reason = tk.StringVar(value="Connect to a device before starting.")
         self.note = tk.StringVar()
         self.metric_values = []
@@ -189,12 +230,12 @@ class Dashboard:
         self._label(header, "TripleTECControl", size=22, bold=True).grid(row=0, column=0, sticky="w")
         self._label(header, "THERMAL CONTROL / 3 CHANNELS", size=9, color="muted").grid(row=1, column=0, sticky="w")
         source = ttk.Combobox(header, state="readonly", textvariable=self.source,
-                              values=("Live hardware", "Demo (simulated)"), width=18)
+                              values=(*SOURCES, "Demo (simulated)"), width=19)
         source.grid(row=0, column=1, rowspan=2, padx=(10, 12))
         source.bind("<<ComboboxSelected>>", self._source_changed)
         self.connect_button = self._button(header, "Connect", self.connect, accent=True)
         self.connect_button.grid(row=0, column=2, rowspan=2)
-        self.advanced_button = self._button(header, "Probe…", self._advanced)
+        self.advanced_button = self._button(header, "Connection…", self._advanced)
         self.advanced_button.grid(row=0, column=3, rowspan=2, padx=(8, 0))
 
         state = tk.Frame(shell, bg=COLORS["bg"])
@@ -324,12 +365,13 @@ class Dashboard:
         self.history.clear()
         self.dirty = False
         self.demo_armed = False
+        self.active_transport = None
         if self._is_demo():
             self.demo_started = time.monotonic()
             self._demo_update()
             self.message.set("Demo is simulated. No hardware reads or commands are sent.")
         else:
-            self.message.set("Live hardware selected. Select Connect to read the Pico-linked controller.")
+            self.message.set(f"{self.source.get()} selected. Select Connect to read the controller.")
         self._render()
 
     def connect(self):
@@ -345,25 +387,56 @@ class Dashboard:
             self._new_generation()
             self.connecting = True
             self.last_error = None
-            self.worker.submit(self.generation, "connect", self.serial.get().strip())
-            self.message.set("Opening OpenOCD and reading the device. The window remains responsive.")
+            self.worker.submit(self.generation, "connect", {
+                "transport": SOURCES.get(self.source.get(), "auto"),
+                "serial": self.serial.get().strip(), "port": self.port.get().strip(),
+                "usb_serial": self.usb_serial.get().strip(),
+            })
+            self.message.set("Opening the selected link and reading status. The window remains responsive.")
         self._render()
 
     def _advanced(self):
         window = tk.Toplevel(self.root)
-        window.title("Probe connection")
+        window.title("Connection settings")
         window.configure(bg=COLORS["panel"])
         window.resizable(False, False)
         window.transient(self.root)
-        self._label(window, "Pico / CMSIS-DAP serial (optional)", size=11, bold=True).pack(anchor="w", padx=20, pady=(18, 8))
+        self._label(window, "STM32 USB COM port", size=11, bold=True).pack(anchor="w", padx=20, pady=(18, 8))
+        usb_port = tk.StringVar(value=self.port.get() or "Auto")
+        port_choice = ttk.Combobox(window, state="readonly", textvariable=usb_port, width=35)
+        port_choice.pack(padx=20)
+        device_note = tk.StringVar()
+        self._label(window, variable=device_note, size=9, color="muted", wraplength=350).pack(padx=20, pady=8)
+        def refresh():
+            try:
+                from scripts.usb_link import list_usb_devices
+                devices = list_usb_devices()
+                values = ("Auto", *(item["device"] for item in devices))
+                if usb_port.get() not in values:
+                    usb_port.set("Auto")
+                port_choice.configure(values=values)
+                device_note.set("; ".join(f"{item['device']}: {item['serial_number'] or 'no serial'}" for item in devices)
+                                or "No STM32 USB CDC device detected. Use a USB data cable.")
+            except RuntimeError as error:
+                port_choice.configure(values=("Auto",))
+                device_note.set(str(error))
+        self._button(window, "Refresh USB ports", refresh).pack(anchor="w", padx=20)
+        refresh()
+        self._label(window, "USB device serial / UID (optional)", size=10).pack(anchor="w", padx=20, pady=(14, 6))
+        usb_serial = tk.StringVar(value=self.usb_serial.get())
+        tk.Entry(window, textvariable=usb_serial, width=36, bg=COLORS["raised"], fg=COLORS["text"],
+                 insertbackground=COLORS["text"], relief="flat").pack(padx=20, ipady=7)
+        self._label(window, "Pico / CMSIS-DAP serial (optional)", size=10).pack(anchor="w", padx=20, pady=(14, 6))
         serial = tk.StringVar(value=self.serial.get())
         entry = tk.Entry(window, textvariable=serial, width=36, bg=COLORS["raised"], fg=COLORS["text"],
                          insertbackground=COLORS["text"], relief="flat")
         entry.pack(padx=20, ipady=7)
-        self._label(window, "Leave blank to auto-select a probe. Changes apply on the next connection.",
+        self._label(window, "Blank serials auto-select a single device. Changes apply on the next connection; commands never switch links automatically.",
                     size=9, color="muted", wraplength=350).pack(padx=20, pady=10)
         def save():
             self.serial.set(serial.get().strip())
+            self.port.set("" if usb_port.get() == "Auto" else usb_port.get())
+            self.usb_serial.set(usb_serial.get().strip())
             window.destroy()
         self._button(window, "Save", save, accent=True).pack(anchor="e", padx=20, pady=(0, 18))
         entry.focus_set()
@@ -438,6 +511,7 @@ class Dashboard:
         now = time.monotonic()
         self.snapshot = Snapshot.from_status(data, now)
         self.last_error = None
+        self.active_transport = data.get("transport", self.active_transport)
         self.connected = not self._is_demo()
         if not self.dirty and not self.command_pending:
             if self.snapshot.mode is not None:
@@ -480,7 +554,10 @@ class Dashboard:
                 self.last_error = result
                 if origin == "connect":
                     self.connected = False
-                self.message.set(f"{result}  Check Pico USB, target power, SWD wiring and OpenOCD; then reconnect if needed.")
+                hint = ("Check controller USB-C, the data cable and COM-port selection; then reconnect."
+                        if self.active_transport == "usb" or self.source.get() == "STM32 USB-C"
+                        else "Check controller USB-C or Pico USB, target power and the selected connection; then reconnect.")
+                self.message.set(f"{result}  {hint}")
             self._render()
         self.root.after(100, self._drain)
 
@@ -528,11 +605,12 @@ class Dashboard:
         elif active:
             self.connection_text.set("●  LIVE CONNECTED")
             self.connection_label.configure(fg=COLORS["accent"])
-            self.detail_text.set("Outputs locked OFF · bench image" if sample.outputs_locked_off else "Firmware interlocks active")
+            link_name = "STM32 USB-C" if self.active_transport == "usb" else "Pico SWD"
+            self.detail_text.set(f"{link_name} · " + ("Outputs locked OFF · bench image" if sample.outputs_locked_off else "Firmware interlocks active"))
         else:
             self.connection_text.set("●  READ ERROR" if self.connected and self.last_error else ("●  STALE" if self.connected else "●  DISCONNECTED"))
             self.connection_label.configure(fg=COLORS["amber"] if self.connected else COLORS["muted"])
-            self.detail_text.set(f"Last reading {now - sample.received_at:.0f}s ago · values inactive" if sample else "Connect through the Pico SWD probe to read the controller.")
+            self.detail_text.set(f"Last reading {now - sample.received_at:.0f}s ago · values inactive" if sample else "Connect using controller USB-C or the Pico SWD probe.")
         self.connect_button.configure(text="Disconnect" if self.connected or self.connecting else "Connect",
                                       state="disabled" if demo else "normal")
         self.advanced_button.configure(state="disabled" if self.connected or self.connecting or demo else "normal")
@@ -621,6 +699,7 @@ class Dashboard:
     def close(self):
         self.closed = True
         self._new_generation()
+        self.worker.shutdown()
         self.root.destroy()
 
 
@@ -629,10 +708,14 @@ def main(argv=None):
     parser.add_argument("--demo", action="store_true", help="Show simulated data; never contact hardware")
     parser.add_argument("--connect", action="store_true", help="Connect to live hardware on launch")
     parser.add_argument("--serial", help="Optional CMSIS-DAP probe serial")
+    parser.add_argument("--transport", choices=("auto", "usb", "swd"), default="auto",
+                        help="Select STM32 USB CDC or Pico SWD (default: USB first)")
+    parser.add_argument("--port", help="Optional STM32 USB COM port")
     parser.add_argument("--smoke-test", action="store_true", help="Render an offline demo and close automatically")
     args = parser.parse_args(argv)
     root = tk.Tk()
-    app = Dashboard(root, demo=args.demo or args.smoke_test, connect=args.connect and not args.smoke_test, serial=args.serial)
+    app = Dashboard(root, demo=args.demo or args.smoke_test, connect=args.connect and not args.smoke_test,
+                    serial=args.serial, transport=args.transport, port=args.port)
     if args.smoke_test:
         root.after(1500, app.close)
     root.mainloop()

@@ -105,8 +105,8 @@ def consistent_commissioning(first: bytes, second: bytes) -> dict:
         raise ValueError("Commissioning snapshot changed or is incomplete")
     words = struct.unpack(f"<{len(first) // 4}I", first)
     signed = struct.unpack(f"<{len(first) // 4}i", first)
-    if (words[0] != 0x5445434D or words[2] not in (1, 2) or words[1] & 1 or
-            len(first) != {1: 80, 2: 104}[words[2]]):
+    if (words[0] != 0x5445434D or words[2] not in (1, 2, 3) or words[1] & 1 or
+            len(first) != {1: 80, 2: 104, 3: 104}[words[2]]):
         raise ValueError("Commissioning identity or sequence is invalid")
     if words[4] > 6 or words[5] & ~0x3F or words[12] > 9:
         raise ValueError("Commissioning state, flags, or fault code is invalid")
@@ -118,11 +118,14 @@ def consistent_commissioning(first: bytes, second: bytes) -> dict:
         raise ValueError("Commissioning test profile is invalid")
     extension = dict.fromkeys(("kind", "control_target_c", "guard_floor_c", "control_duty",
                                "control_state", "control_state_name", "plate_c"))
-    if words[2] == 2:
+    if words[2] >= 2:
         kind = words[20]
         if kind > 6 or words[23] > 417 or words[24] > 2:
             raise ValueError("Commissioning control fields are invalid")
-        if signed[21] != (27000 if kind in (5, 6) else INVALID):
+        target_valid = (signed[21] == INVALID if kind < 5 else
+                        signed[21] == 27000 if words[2] == 2 else
+                        (-40000 <= signed[21] <= 100000 or (words[4] == 6 and signed[21] == INVALID)))
+        if not target_valid:
             raise ValueError("Commissioning control target is invalid")
         if kind < 5 and (words[23] != 0 or words[24] != 0):
             raise ValueError("Inactive commissioning control must report zero duty")
@@ -137,7 +140,7 @@ def consistent_commissioning(first: bytes, second: bytes) -> dict:
     if words[4] == 0:
         valid_timing = (words[13] in (0, 1000) and words[14] in (0, 1000) and
                         words[15] in (0, 20) and extension["kind"] in (None, 0))
-    elif words[2] == 2:
+    elif words[2] >= 2:
         kind = words[20]
         expected_timing = ((1000, 1000, 20) if kind <= 2 else
                            (30000, 5000, 12) if kind <= 4 else (300000, 5000, 12))

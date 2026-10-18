@@ -97,7 +97,7 @@ static commission_telemetry_t snapshot(void)
     commission_telemetry_t result;
     memset(&result, 0, sizeof(result));
     commissioning_snapshot(&result, now_ms);
-    assert(result.magic == 0x5445434dU && result.schema == 2U);
+    assert(result.magic == 0x5445434dU && result.schema == 3U);
     assert((result.duration_ms == 1000U && result.on_us == 1000U && result.period_ms == 20U) ||
            (result.duration_ms == 30000U && result.on_us == 5000U && result.period_ms == 12U) ||
            (result.duration_ms == 300000U && result.on_us == 5000U && result.period_ms == 12U));
@@ -493,9 +493,16 @@ static void test_live_guards(void)
     }
 }
 
+static void select_target(float target)
+{
+    float dew;
+    assert(tec_dewpoint_c(inputs.ambient_c, inputs.rh_percent, &dew));
+    controller.config.dewpoint_margin_c = target - dew;
+}
+
 static void test_hold27_below_target_and_hysteresis(void)
 {
-    reset(); prepare();
+    reset(); select_target(27.0f); prepare();
     inputs.plate[0].temperature_c = 26.5f;
     assert(commissioning_start(&inputs, &controller, true, 5, now_ms) == CONTROL_INTERLOCK);
     start(6);
@@ -532,7 +539,7 @@ static void test_hold27_below_target_and_hysteresis(void)
 
 static void test_hold27_slew_taper_and_no_burst(void)
 {
-    verify_trip();
+    verify_trip(); select_target(27.0f);
     inputs.plate[0].temperature_c = 31.0f;
     start(5);
     assert(prepared_drive && snapshot().kind == 5U && snapshot().control_target_mc == 27000);
@@ -568,7 +575,7 @@ static void test_hold27_slew_taper_and_no_burst(void)
 
 static void test_hold27_five_minute_timeout(void)
 {
-    reset(); prepare(); start(6);
+    reset(); select_target(27.0f); prepare(); start(6);
     const uint32_t started = now_ms;
     for (uint32_t at = started + 12U; at < started + 300000U; at += 12U) { tick(at); }
     assert(commissioning_active() && !prepared_drive);
@@ -585,28 +592,27 @@ static void test_hold27_five_minute_timeout(void)
 
 static void test_hold27_dew_and_liveness_guards(void)
 {
-    reset(); prepare();
-    /* A below-target plate can start safely just above its independent floor. */
-    controller.config.absolute_min_c = 25.0f;
+    reset(); select_target(27.0f); prepare();
     inputs.plate[0].temperature_c = 26.4f;
     start(6);
-    assert(snapshot().control_target_mc == 27000 && snapshot().guard_floor_mc == 25000);
-    inputs.plate[0].temperature_c = 25.5f;
-    tick(112U);
-    assert(snapshot().state == TEST_FAULT && snapshot().fault_code == 5U);
-
-    reset(); prepare();
-    controller.config.absolute_min_c = 26.0f;
-    assert(commissioning_start(&inputs, &controller, true, 6, now_ms) == CONTROL_INTERLOCK);
-    reset(); prepare(); start(6);
+    assert(snapshot().control_target_mc == 27000 && snapshot().control_state == 2U);
+    /* Humidity changes the target itself; it does not reject a fixed27 target. */
     inputs.rh_percent = 70.0f;
-    inputs.plate[0].temperature_c = 31.0f;
     tick(112U);
+    assert(commissioning_active() && snapshot().control_target_mc > 27000);
+    assert(snapshot().control_state == 2U && snapshot().control_duty_milli == 0U);
+    inputs.rh_percent = 40.0f;
+    tick(124U);
+    assert(commissioning_active() && snapshot().control_target_mc < 27000);
+    assert(snapshot().control_state == 1U);
+    /* Crossing the actual dew-point cutoff remains a latched fault. */
+    inputs.rh_percent = 70.0f;
+    tick(136U);
+    inputs.plate[0].temperature_c = (float)snapshot().guard_floor_mc / 1000.0f - 0.01f;
+    tick(148U);
     assert(snapshot().state == TEST_FAULT && snapshot().fault_code == 5U);
-    assert(snapshot().control_target_mc == 27000 && snapshot().guard_floor_mc > 26000);
-    assert(snapshot().control_target_mc != snapshot().guard_floor_mc);
 
-    reset(); prepare();
+    reset(); select_target(27.0f); prepare();
     inputs.plate[0].temperature_c = 26.5f;
     start(6);
     now_ms = 501U;
@@ -614,7 +620,7 @@ static void test_hold27_dew_and_liveness_guards(void)
     commissioning_tick(&inputs, &controller, true, now_ms, now_ms);
     assert(snapshot().state == TEST_FAULT && snapshot().fault_code == 6U);
 
-    reset(); prepare();
+    reset(); select_target(27.0f); prepare();
     inputs.plate[0].temperature_c = 26.5f;
     start(6);
     const uint32_t started = now_ms;
@@ -622,7 +628,7 @@ static void test_hold27_dew_and_liveness_guards(void)
     commissioning_tick(&inputs, &controller, true, now_ms, started);
     assert(snapshot().state == TEST_FAULT && snapshot().fault_code == 7U);
 
-    verify_trip(); start(5);
+    verify_trip(); select_target(27.0f); start(5);
     stage.tripped = true;
     stage.trip_adc = prepared_baseline + 491U;
     tick(now_ms + 12U);
@@ -632,6 +638,20 @@ static void test_hold27_dew_and_liveness_guards(void)
     tick(now_ms + 1000U);
     assert(pulse_calls == before && !commissioning_active());
     assert(commissioning_start(&inputs, &controller, true, 5, now_ms) == CONTROL_INTERLOCK);
+}
+
+static void test_verification_near_selected_target(void)
+{
+    reset(); select_target(27.0f);
+    inputs.plate[0].temperature_c = 27.0f;
+    prepare(); start(1);
+    tick(102U); make_good_trip(); tick(110U);
+    assert(snapshot().state == TEST_TRIP_PASSED);
+    start(5);
+    assert(snapshot().control_state == 2U && snapshot().control_duty_milli == 0U);
+    const unsigned before = pulse_calls;
+    tick(122U);
+    assert(commissioning_active() && pulse_calls == before);
 }
 
 int main(void)
@@ -650,6 +670,7 @@ int main(void)
     test_hold27_slew_taper_and_no_burst();
     test_hold27_five_minute_timeout();
     test_hold27_dew_and_liveness_guards();
+    test_verification_near_selected_target();
     puts("commissioning engine tests passed");
     return 0;
 }

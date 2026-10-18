@@ -71,28 +71,39 @@ def require_commissioning_support(status: dict) -> dict:
 
 def require_commissioning_preflight(status: dict, name: str, value: int) -> None:
     commissioning = require_commissioning_support(status)
-    if (status.get("outputs_locked_off") is not True or status.get("armed_mask") != 0 or
+    dew_control = commissioning.get("schema") == 3
+    preparing = name == "commission_prepare"
+    if ((status.get("outputs_locked_off") is not True and not (preparing and dew_control)) or status.get("armed_mask") != 0 or
             status.get("applied_duty") != [0, 0, 0] or status.get("desired_duty") != [0, 0, 0] or
             status.get("mode") != 0 or status.get("margin_c", 0) < 3):
         raise RuntimeError("TEC1 commissioning requires locked, stopped, regulated control with a 3 °C margin")
     plate = status.get("plate_c", [None])[0]
     target = status.get("target_c")
+    dew = status.get("dewpoint_c")
+    dew_guard = dew_control and (preparing or value in (1, 5, 6))
     if (status.get("valid_flags", 0) & 0x27 != 0x27 or
             type(plate) not in (int, float) or type(target) not in (int, float) or
-            not math.isfinite(plate) or not math.isfinite(target) or plate <= target + 1):
+            not math.isfinite(plate) or not math.isfinite(target)):
         raise RuntimeError("TEC1 commissioning requires fresh probe 1 above target + 1 °C")
+    if dew_guard:
+        if type(dew) not in (int, float) or not math.isfinite(dew) or plate <= max(0, dew + 0.5):
+            raise RuntimeError("Probe 1 must be above dew point + 0.5 °C before commissioning")
+    elif plate <= target + 1:
+        raise RuntimeError("This fixed-power test requires probe 1 above target + 1 °C")
     if commissioning.get("state") in (2, 4):
         raise RuntimeError("A TEC1 commissioning test is already running")
     if name == "commission_test":
+        if commissioning.get("state") == 6:
+            raise RuntimeError("Prepare TEC1 again after STOP or a fault")
         if not commissioning.get("zero_valid") or not commissioning.get("selftest_passed"):
             raise RuntimeError("Prepare TEC1 and zero current before requesting a test")
         if value in (2, 3, 5) and not commissioning.get("trip_verified"):
             raise RuntimeError("Verify the TEC1 shutdown path before the guarded run")
         if value in (5, 6):
-            if commissioning.get("schema") != 2:
-                raise RuntimeError("Fixed-temperature regulation requires commissioning schema 2")
-            if 27 <= target + 1:
-                raise RuntimeError("The 27 °C hold target must exceed the dew-point safety floor by more than 1 °C")
+            if not dew_control:
+                raise RuntimeError("Dew-point target regulation requires commissioning schema 3")
+            if not 20 <= target <= 45:
+                raise RuntimeError("The supervised regulation target must be within 20–45 °C")
 
 
 def _ram_region(address: object, length: int) -> int:
@@ -353,7 +364,10 @@ class DeviceLink:
                         if name == "commission_prepare" and not (
                                 commissioning.get("zero_valid") and commissioning.get("selftest_passed")):
                             raise RuntimeError("Controller ACK did not confirm current zero and OFF self-test")
-                        if (name == "commission_test" and commissioning.get("schema") == 2 and
+                        if (name == "commission_prepare" and commissioning.get("schema") == 3 and
+                                acknowledged.get("outputs_locked_off") is not True):
+                            raise RuntimeError("Preparation did not confirm the required bench lock")
+                        if (name == "commission_test" and commissioning.get("schema") in (2, 3) and
                                 commissioning.get("kind") != value):
                             raise RuntimeError("Controller ACK did not echo the requested commissioning test")
                     return acknowledged

@@ -78,7 +78,7 @@ typedef struct {
     uint32_t elapsed_ms;
     int32_t min_plate_mc;
     uint32_t trip_adc, trip_timer_us;
-    /* Schema 2: fixed-temperature commissioning is distinct from dew protection.
+    /* Schema 3: regulation follows the displayed dew-point target.
      * Duty is the pulse-density request, not the normal-controller duty field. */
     uint32_t kind;
     int32_t control_target_mc, guard_floor_mc;

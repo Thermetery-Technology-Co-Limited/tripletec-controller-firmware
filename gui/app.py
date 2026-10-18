@@ -25,7 +25,7 @@ SOURCES = {"Auto (USB first)": "auto", "STM32 USB-C": "usb", "Pico SWD": "swd"}
 
 def tec1_test_block_reason(sample, *, connected, transport, now,
                            command_pending=False, last_error=None, demo=False,
-                           commissioning_action=False):
+                           commissioning_action=False, prepare_relocks=False, use_dew_guard=False):
     """Gate the separate pulse action without changing normal ARM interlocks."""
     if demo or not connected or transport != "swd":
         return "Connect through Pico SWD to test TEC1."
@@ -37,7 +37,7 @@ def tec1_test_block_reason(sample, *, connected, transport, now,
         return "Stop or finish the TEC1 commissioning test before a separate pulse."
     if not commissioning_action and sample.valid_flags is not None and sample.valid_flags & 0x80:
         return "Use the current-protected commissioning tests below."
-    if (sample.schema != 2 or sample.outputs_locked_off is not True or
+    if (sample.schema != 2 or (sample.outputs_locked_off is not True and not prepare_relocks) or
             sample.armed_mask != 0 or any(value != 0 for value in sample.applied_duty) or
             any(value != 0 for value in sample.desired_duty)):
         return "TEC1 testing requires stopped bench firmware and zero output on every channel."
@@ -50,7 +50,9 @@ def tec1_test_block_reason(sample, *, connected, transport, now,
             sample.dewpoint_c is None or sample.target_c is None or
             sample.plate_c[0] is None or sample.current_a[0] is None):
         return "Valid ambient, probe 1 and current readings are required before testing TEC1."
-    if sample.plate_c[0] <= sample.target_c + 1.0:
+    if use_dew_guard and sample.plate_c[0] <= max(0, sample.dewpoint_c + 0.5):
+        return "Probe 1 must be above dew point + 0.5 °C before testing TEC1."
+    if not use_dew_guard and sample.plate_c[0] <= sample.target_c + 1.0:
         return "Probe 1 must be more than 1 °C above the target before testing TEC1."
     return None
 
@@ -59,10 +61,12 @@ def commissioning_block_reason(sample, action, *, connected, transport, now,
                                command_pending=False, last_error=None, demo=False):
     if action not in ("prepare", "verify", "run", "observe", "hold"):
         return "Unsupported commissioning action."
+    dew_control = bool(sample and sample.commissioning and sample.commissioning.get("schema") == 3)
     reason = tec1_test_block_reason(
         sample, connected=connected, transport=transport, now=now,
         command_pending=command_pending, last_error=last_error, demo=demo,
-        commissioning_action=True)
+        commissioning_action=True, prepare_relocks=dew_control and action == "prepare",
+        use_dew_guard=dew_control and action in ("prepare", "verify", "hold"))
     if reason:
         return reason
     if sample.valid_flags is None or not sample.valid_flags & 0x80:
@@ -72,16 +76,18 @@ def commissioning_block_reason(sample, action, *, connected, transport, now,
         return "Fresh commissioning status is required."
     if sample.mode != 0 or sample.margin_c is None or sample.margin_c < 3:
         return "Use regulated mode with a dew-point margin of at least 3 °C."
+    if action != "prepare" and commissioning.get("state") == 6:
+        return "Prepare TEC1 again after STOP or a fault."
     if action != "prepare" and not (commissioning.get("zero_valid") and
                                     commissioning.get("selftest_passed")):
         return "Prepare TEC1 and zero current before the shutdown test."
     if action in ("run", "observe", "hold") and not commissioning.get("trip_verified"):
         return "Verify the 5 A shutdown path before the guarded 15 A run."
     if action == "hold":
-        if commissioning.get("schema") != 2:
-            return "Load firmware with fixed-temperature TEC1 regulation support."
-        if 27 <= sample.target_c + 1:
-            return "The 27 °C hold target must exceed the dew-point safety floor by more than 1 °C."
+        if not dew_control:
+            return "Load firmware with dew-point target regulation support."
+        if not 20 <= sample.target_c <= 45:
+            return "The supervised regulation target must be within 20–45 °C."
     return None
 
 
@@ -94,9 +100,12 @@ def commissioning_result_text(commissioning):
     state = commissioning.get("state")
     text = states.get(state, "Unknown state")
     if state == 4 and commissioning.get("kind") in (5, 6):
-        text = {0: "27 °C controller active", 1: "Cooling toward 27 °C",
-                2: "Holding; cooling OFF until above 27.2 °C"}.get(commissioning.get("control_state"),
-                                                       "27 °C controller state unavailable")
+        target = commissioning.get("control_target_c")
+        target_text = format_value(target, " °C")
+        restart_text = format_value(target + 0.2 if target is not None else None, " °C")
+        text = {0: "Temperature controller active", 1: "Cooling toward " + target_text,
+                2: "Holding; cooling OFF until " + restart_text}.get(commissioning.get("control_state"),
+                                                       "Controller state unavailable")
         if commissioning.get("kind") == 6:
             text = "GPIO-low dry run · " + text
     if commissioning.get("zero_valid"):
@@ -117,14 +126,15 @@ def commissioning_result_text(commissioning):
 
 
 def regulation_status_text(sample):
-    """Keep the fixed control setpoint distinct from the condensation guard."""
+    """Show the same dew-derived target as the top-level target card."""
     commissioning = sample.commissioning if sample else None
-    valid = commissioning and commissioning.get("valid") is True and commissioning.get("schema") == 2
+    valid = commissioning and commissioning.get("valid") is True and commissioning.get("schema") in (2, 3)
     active = valid and commissioning.get("kind") in (5, 6) and commissioning.get("state") == 4
     floor = commissioning.get("guard_floor_c") if active else None
-    if floor is None:
-        floor = sample.target_c if sample else None
-    text = "Hold target 27.0 °C · Dew-point safety floor " + format_value(floor, " °C")
+    if floor is None and sample and sample.dewpoint_c is not None:
+        floor = max(0, sample.dewpoint_c + 0.5)
+    target = commissioning.get("control_target_c") if active else sample.target_c if sample else None
+    text = "Hold target " + format_value(target, " °C") + " · Dew-point cutoff " + format_value(floor, " °C")
     if not active:
         return text + " · Regulation inactive · 41.7% PWM cap"
     state = {0: "Inactive", 1: "Cooling", 2: "Holding, cooling OFF"}.get(
@@ -450,7 +460,7 @@ class Dashboard:
         commission.grid(row=8, column=0, columnspan=5, sticky="ew", padx=16, pady=(2, 12))
         self._label(commission, "TEC1 COMMISSIONING · 15 A provisional trip", size=10,
                     color="accent", bold=True).pack(anchor="w")
-        self.commission_summary_label = self._label(commission, "15 A provisional shutdown trip; gain remains nominal. Hold regulates TEC1 at 27 °C for up to 5 min, with a separate dew-point safety floor and 41.7% PWM cap. Cooling stops at 27 °C and resumes above 27.2 °C. Every action requires your click.",
+        self.commission_summary_label = self._label(commission, "Prepare locks outputs OFF and zeros current. Verify shutdown enables the powered tests. Hold follows the displayed Target Floor (dew point + margin), stops cooling at that target and resumes 0.2 °C above it. Maximum 5 min, 41.7% duty, 15 A provisional trip. Each action requires your click.",
                     size=9, color="amber", wraplength=1000)
         self.commission_summary_label.pack(anchor="w", pady=(3, 6))
         self.commission_buttons = {}
@@ -458,7 +468,7 @@ class Dashboard:
                               ("verify", "Verify shutdown (5 A, 1 ms)"),
                               ("run", "Run TEC1 (15 A trip, 1 s max)"),
                               ("observe", "Observe cooling (41.7%, 30 s max)"),
-                              ("hold", "Hold TEC1 at 27°C (5 min max)")):
+                              ("hold", "Hold dew-point target (5 min max)")):
             button = self._button(commission, title, lambda value=action: self.commission_tec1(value))
             button.pack(anchor="w", pady=2)
             self.commission_buttons[action] = button
@@ -954,7 +964,7 @@ class Dashboard:
         commission_reason = commissioning_block_reason(
             sample, "prepare", connected=self.connected, transport=self.active_transport, now=now,
             command_pending=self.command_pending, last_error=self.last_error, demo=demo)
-        self.commission_reason.set(commission_reason or "Each action requires your click. Preparation leaves outputs OFF; verification and run energize TEC1 briefly.")
+        self.commission_reason.set(commission_reason or "Prepare restores the required bench lock and leaves outputs OFF. Verify shutdown, then Hold dew-point target.")
         unregulated = self.mode.get() == 1 or (sample is not None and sample.mode == 1)
         self.note.set("Bypasses dew-point protection; condensation may occur. Sensor and current trips remain active. Margin is ignored." if unregulated else "Regulated target = max(0 °C, dew point + margin). Applying settings never starts outputs.")
         self.note_label.configure(fg=COLORS["amber"] if unregulated else COLORS["muted"])

@@ -201,6 +201,7 @@ static control_result_t apply_command(void *context, uint32_t opcode,
         return CONTROL_OK;
     case CONTROL_COMMISSION_PREPARE: {
         disarm_all();
+        bench_outputs_locked = true; /* Preparation establishes its required OFF state. */
         const control_result_t result = commissioning_prepare(&inputs, &controller,
                                                                bench_outputs_locked, value, now_ms);
         if (result == CONTROL_OK) {
@@ -407,7 +408,7 @@ int main(void)
     usb_protocol_init(&usb_protocol, usb_apply, usb_snapshot, usb_enqueue, NULL);
     usb_enabled = usb_device_init();
     usb_session_generation = usb_device_session_generation();
-    board_uart_write("TripleTECDriver v0.5.0: supervised fixed27C available; dew guard separate; bench lock ON.\r\n");
+    board_uart_write("TripleTECDriver v0.5.1: regulate displayed dew target; bench lock ON.\r\n");
 
     for (;;) {
         uint32_t now = board_millis();

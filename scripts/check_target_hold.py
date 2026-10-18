@@ -1,4 +1,4 @@
-"""Exercise fixed-27C feedback with the TEC gate held LOW. Close the GUI first.
+"""Exercise dew-point target feedback with the TEC gate held LOW. Close the GUI first.
 
 This selects commissioning kind 6, which never connects TIM2 to the gate pin.
 It does not substitute simulated temperatures into live sensors or run a
@@ -39,7 +39,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--seconds", type=float, default=20.0)
     parser.add_argument("--serial")
-    parser.add_argument("--output", type=Path, default=Path("build/hold27-gpio-low-check.json"))
+    parser.add_argument("--output", type=Path, default=Path("build/target-hold-gpio-low-check.json"))
     args = parser.parse_args()
     if not 2 <= args.seconds <= 45:
         parser.error("--seconds must be between 2 and 45")
@@ -47,8 +47,8 @@ def main() -> None:
     result = {"agent_issued_energized_pulse": False, "requested_kind": 6, "snapshots": []}
     initial = link.read_status()
     require_off(initial)
-    if initial.get("commissioning", {}).get("schema") != 2:
-        raise RuntimeError("Load fixed-27C commissioning firmware before this check")
+    if initial.get("commissioning", {}).get("schema") != 3:
+        raise RuntimeError("Load dew-point target commissioning firmware before this check")
     result["initial"] = initial
     try:
         require_off(link.command("stop"))
@@ -61,7 +61,7 @@ def main() -> None:
             hold = status.get("commissioning", {})
             if (hold.get("valid") is not True or hold.get("kind") != 6 or
                     hold.get("drive") is not False or hold.get("state") != 4 or
-                    hold.get("fault_code") != 0 or hold.get("control_target_c") != 27):
+                    hold.get("fault_code") != 0 or abs(hold.get("control_target_c", -999) - status["target_c"]) > 0.1):
                 raise RuntimeError(f"GPIO-LOW hold session failed: {hold}")
             result["snapshots"].append(status)
             if time.monotonic() >= deadline:

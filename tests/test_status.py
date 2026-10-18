@@ -344,12 +344,22 @@ class StatusTest(unittest.TestCase):
                 with self.subTest(kind=kind, changes=changes), self.assertRaises(ValueError):
                     status.consistent_commissioning(payload, payload)
 
+    def test_schema_three_reports_dynamic_target_and_sensor_fault(self):
+        for target, state in ((27100, 4), (24567, 4), (status.INVALID, 6)):
+            payload = bytearray(commissioning_v2_frame(state=state, kind=5,
+                duration_ms=300000, on_us=5000, period_ms=12,
+                control_target_mc=target, guard_floor_mc=20500))
+            struct.pack_into("<I", payload, 8, 3)
+            result = status.consistent_commissioning(payload, payload)
+            self.assertEqual(result["schema"], 3)
+            self.assertEqual(result["control_target_c"], None if target == status.INVALID else target / 1000)
+
     def test_commissioning_schema_two_rejects_torn_truncated_and_schema_length_mismatches(self):
         payload = commissioning_v2_frame()
         for other in (payload[:80], payload[:100], payload + bytes(4), commissioning_v2_frame(sequence=4)):
             with self.subTest(length=len(other)), self.assertRaises(ValueError):
                 status.consistent_commissioning(payload, other)
-        for schema, data in ((1, payload), (2, commissioning_frame()), (3, payload)):
+        for schema, data in ((1, payload), (2, commissioning_frame()), (4, payload)):
             changed = bytearray(data)
             struct.pack_into("<I", changed, 8, schema)
             with self.subTest(schema=schema, length=len(data)), self.assertRaises(ValueError):

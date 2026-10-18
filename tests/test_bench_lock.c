@@ -24,7 +24,7 @@ void commissioning_snapshot(commission_telemetry_t *dest, uint32_t now)
 { memset(dest, 0, sizeof(*dest)); dest->uptime_ms = now; }
 control_result_t commissioning_prepare(const tec_inputs_t *in, const tec_controller_t *ctrl,
                                        bool locked, int32_t value, uint32_t now)
-{ (void)in; (void)ctrl; (void)locked; (void)value; (void)now; return CONTROL_INTERLOCK; }
+{ (void)in; (void)ctrl; assert(locked); (void)value; (void)now; return CONTROL_INTERLOCK; }
 control_result_t commissioning_start(const tec_inputs_t *in, const tec_controller_t *ctrl,
                                      bool locked, int32_t value, uint32_t now)
 { (void)in; (void)ctrl; (void)locked; (void)value; (void)now; return CONTROL_INTERLOCK; }
@@ -157,6 +157,11 @@ int main(void)
             assert_policy_unchanged(&config);
         }
     }
+    set_lock_and_assert(0, 1030U);
+    expected_lock_at_force_off = false;
+    assert(apply_command(NULL, CONTROL_COMMISSION_PREPARE, 15000, 1031U) == CONTROL_INTERLOCK);
+    assert(bench_outputs_locked); /* Even a rejected preparation restores OFF. */
+    assert_policy_unchanged(&config);
     puts("runtime bench lock: stop-before-transition, telemetry, invalid-value and independent interlock tests passed");
     return 0;
 }

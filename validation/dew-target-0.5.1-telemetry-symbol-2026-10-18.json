@@ -1,0 +1,15 @@
+{
+  "address": 536872632,
+  "size": 160,
+  "schema": 2,
+  "mailbox_address": 536870920,
+  "mailbox_size": 32,
+  "adc_diagnostics_address": 536872600,
+  "adc_diagnostics_size": 32,
+  "limit_configuration_address": 536872568,
+  "limit_configuration_size": 32,
+  "commissioning_address": 536872464,
+  "commissioning_size": 104,
+  "elf": "tripletec-bench.elf",
+  "firmware_sha256": "5fd2b84ff69455680e5bda9a13ae68d3849a1cef87af1a973568a0d4026f3ef2"
+}

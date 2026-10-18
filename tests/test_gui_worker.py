@@ -44,7 +44,7 @@ def completed_commissioning_status(**changes):
 
 
 def hold_commissioning_status(**changes):
-    return commissioning_status(**{"schema": 2, "state": 3, "flags": 23,
+    return commissioning_status(**{"schema": 3, "state": 3, "flags": 23,
         "trip_verified": True, "kind": 0, "control_target_c": None,
         "guard_floor_c": 21.6, "control_duty": 0, "control_state": 0,
         "plate_c": 26, **changes})
@@ -520,14 +520,30 @@ class CommissioningControlsTest(unittest.TestCase):
                 self.assertIsNotNone(self.reason("hold", data))
 
     def test_hold_requires_plate_and_setpoint_above_guard_floor_plus_one(self):
-        for plate in (21.6, 22.6):
+        for plate in (18.6, 19.1):
             data = commissioning_bench_status(plate_c=[plate, None, None],
                 commissioning=hold_commissioning_status(plate_c=plate))
             with self.subTest(plate=plate):
                 self.assertIsNotNone(self.reason("hold", data))
-        data = commissioning_bench_status(target_c=26, plate_c=[28, None, None],
+        data = commissioning_bench_status(target_c=19, plate_c=[28, None, None],
             commissioning=hold_commissioning_status(guard_floor_c=26, plate_c=28))
-        self.assertIn("27 °C hold target", self.reason("hold", data))
+        self.assertIn("20–45 °C", self.reason("hold", data))
+
+    def test_prepare_recovers_unlocked_near_target_then_verifies(self):
+        data = commissioning_bench_status(outputs_locked_off=False, target_c=27.1,
+            dewpoint_c=20.1, margin_c=7, plate_c=[27.5, None, None],
+            commissioning=hold_commissioning_status(trip_verified=False))
+        self.assertIsNone(self.reason("prepare", data))
+        self.assertIsNotNone(self.reason("verify", data))
+        data["outputs_locked_off"] = True
+        self.assertIsNone(self.reason("verify", data))
+        data["commissioning"]["trip_verified"] = True
+        self.assertIsNone(self.reason("hold", data))
+        data["plate_c"][0] = 27.0
+        self.assertIsNone(self.reason("hold", data))
+        data["commissioning"]["state"] = 6
+        self.assertIsNone(self.reason("prepare", data))
+        self.assertIn("Prepare", self.reason("hold", data))
 
     def test_hold_is_operator_only_swd_action_and_every_common_gate_applies(self):
         data = commissioning_bench_status(commissioning=hold_commissioning_status())
@@ -636,26 +652,26 @@ class CommissioningControlsTest(unittest.TestCase):
                     control_state=state, control_duty=duty, plate_c=26.8)), 100)
             text = app.regulation_status_text(sample)
             self.assertIn("Hold target 27.0 °C", text)
-            self.assertIn("Dew-point safety floor 21.6 °C", text)
+            self.assertIn("Dew-point cutoff 21.6 °C", text)
             self.assertIn(label, text)
             self.assertIn("Demand " + demand + " / 41.7% cap", text)
             self.assertIn("Plate 26.8 °C", text)
         ready = app.Snapshot.from_status(commissioning_bench_status(
             commissioning=hold_commissioning_status()), 100)
         self.assertIn("Regulation inactive", app.regulation_status_text(ready))
-        self.assertIn("Hold target 27.0 °C", app.regulation_status_text(None))
+        self.assertIn("Hold target —", app.regulation_status_text(None))
 
     def test_inactive_hold_uses_current_guard_and_does_not_claim_target_reached(self):
         held = hold_commissioning_status(state=4, kind=5, control_target_c=27,
                                         control_state=2, control_duty=0, plate_c=26.44)
         result_text = app.commissioning_result_text(held)
-        self.assertIn("cooling OFF until above 27.2 °C", result_text)
+        self.assertIn("cooling OFF until 27.2 °C", result_text)
         self.assertNotIn("Holding at 27", result_text)
         finished = {**held, "state": 5}
         sample = app.Snapshot.from_status(commissioning_bench_status(
             target_c=24.5, commissioning=finished), 100)
         text = app.regulation_status_text(sample)
-        self.assertIn("Dew-point safety floor 24.5 °C", text)
+        self.assertIn("Hold target 24.5 °C", text)
         self.assertNotIn("21.6 °C", text)
 
 

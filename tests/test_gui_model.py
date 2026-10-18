@@ -109,6 +109,22 @@ class PresentationTests(unittest.TestCase):
                 self.assertIs(sample.commissioning["valid"], False)
                 self.assertFalse(sample.commissioning_running)
 
+    def test_schema_two_malformed_hold_control_keeps_normal_status_for_stop(self):
+        valid = commissioning_status(schema=2, state=4, kind=5, control_target_c=27,
+            guard_floor_c=21.6, control_duty=0.417, control_state=1, plate_c=27.1)
+        for changes in ({"kind": 7}, {"kind": True}, {"control_state": 3}, {"control_state": True},
+                        {"control_duty": 0.418}, {"control_duty": -0.001}, {"control_duty": True},
+                        {"control_duty": math.nan}, {"control_target_c": None},
+                        {"control_target_c": 26.999}, {"control_target_c": "27"}):
+            with self.subTest(changes=changes):
+                sample = Snapshot.from_status(status(valid_flags=0xE7,
+                    commissioning={**valid, **changes}), 10)
+                self.assertEqual(sample.schema, 2)
+                self.assertTrue(sample.outputs_locked_off)
+                self.assertEqual(sample.plate_c, (25, None, 27))
+                self.assertIs(sample.commissioning["valid"], False)
+                self.assertFalse(sample.commissioning_running)
+
     def test_reported_mode_and_actual_duty_are_distinct(self):
         sample = Snapshot.from_status(status(mode=1, target_c=None, desired_duty=[1, 1, 1]), 0)
         self.assertEqual(mode_label(sample.mode), "Unregulated (100%)")

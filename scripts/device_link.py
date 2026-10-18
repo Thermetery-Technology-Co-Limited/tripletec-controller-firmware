@@ -86,8 +86,13 @@ def require_commissioning_preflight(status: dict, name: str, value: int) -> None
     if name == "commission_test":
         if not commissioning.get("zero_valid") or not commissioning.get("selftest_passed"):
             raise RuntimeError("Prepare TEC1 and zero current before requesting a test")
-        if value in (2, 3) and not commissioning.get("trip_verified"):
+        if value in (2, 3, 5) and not commissioning.get("trip_verified"):
             raise RuntimeError("Verify the TEC1 shutdown path before the guarded run")
+        if value in (5, 6):
+            if commissioning.get("schema") != 2:
+                raise RuntimeError("Fixed-temperature regulation requires commissioning schema 2")
+            if 27 <= target + 1:
+                raise RuntimeError("The 27 °C hold target must exceed the dew-point safety floor by more than 1 °C")
 
 
 def _ram_region(address: object, length: int) -> int:
@@ -129,9 +134,9 @@ class DeviceLink:
                     raise RuntimeError("Unsupported current-limit block size; rebuild firmware")
                 _ram_region(metadata["limit_configuration_address"], 32)
             if "commissioning_address" in metadata:
-                if metadata.get("commissioning_size") != 80:
+                if metadata.get("commissioning_size") not in (80, 104):
                     raise RuntimeError("Unsupported commissioning block size; rebuild firmware")
-                _ram_region(metadata["commissioning_address"], 80)
+                _ram_region(metadata["commissioning_address"], metadata["commissioning_size"])
             return metadata
         except (OSError, ValueError, KeyError, TypeError) as error:
             raise RuntimeError("Firmware symbol metadata missing or invalid; build firmware first") from error
@@ -188,7 +193,7 @@ class DeviceLink:
             commission_snapshots = []
             if "commissioning_address" in metadata:
                 commission_snapshots = [directory / f"commission{i}.bin" for i in range(4)]
-                commands.extend(f"dump_image {_tcl_path(path)} {metadata['commissioning_address']:#x} 80"
+                commands.extend(f"dump_image {_tcl_path(path)} {metadata['commissioning_address']:#x} {metadata['commissioning_size']}"
                                 for path in commission_snapshots)
             mailbox_path = directory / "mailbox.bin"
             if mailbox:
@@ -265,7 +270,8 @@ class DeviceLink:
         """Persist changes, including completed runs shorter than a GUI poll."""
         commissioning = status["commissioning"]
         key = (commissioning["state"], commissioning["fault_code"],
-               commissioning["zero_valid"], commissioning["trip_verified"], commissioning["duration_ms"])
+               commissioning["zero_valid"], commissioning["trip_verified"], commissioning["duration_ms"],
+               commissioning.get("kind"), commissioning.get("control_state"))
         if key == self._commissioning_evidence_key:
             return
         self._commissioning_evidence_key = key
@@ -295,7 +301,7 @@ class DeviceLink:
                 (name == "mode" and value not in (0, 1)) or
                 (name == "bench_lock" and value not in (0, 1)) or
                 (name == "commission_prepare" and value != 15000) or
-                (name == "commission_test" and value not in (0, 1, 2, 3, 4)) or
+                (name == "commission_test" and value not in (0, 1, 2, 3, 4, 5, 6)) or
                 (name == "margin" and not 500 <= value <= 20000) or
                 (name == "arm" and not 1 <= value <= 7)):
             raise RuntimeError("Command value is outside its allowed range")
@@ -347,6 +353,9 @@ class DeviceLink:
                         if name == "commission_prepare" and not (
                                 commissioning.get("zero_valid") and commissioning.get("selftest_passed")):
                             raise RuntimeError("Controller ACK did not confirm current zero and OFF self-test")
+                        if (name == "commission_test" and commissioning.get("schema") == 2 and
+                                commissioning.get("kind") != value):
+                            raise RuntimeError("Controller ACK did not echo the requested commissioning test")
                     return acknowledged
                 time.sleep(0.05)
             raise RuntimeError("Controller did not acknowledge the command; reconnect and check status")

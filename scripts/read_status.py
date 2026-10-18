@@ -101,10 +101,12 @@ def consistent_limit_configuration(first: bytes, second: bytes) -> dict:
 
 
 def consistent_commissioning(first: bytes, second: bytes) -> dict:
-    if len(first) != 80 or len(second) != 80 or first[4:8] != second[4:8]:
+    if len(first) not in (80, 104) or len(first) != len(second) or first[4:8] != second[4:8]:
         raise ValueError("Commissioning snapshot changed or is incomplete")
-    words = struct.unpack("<20I", first)
-    if words[0] != 0x5445434D or words[2] != 1 or words[1] & 1:
+    words = struct.unpack(f"<{len(first) // 4}I", first)
+    signed = struct.unpack(f"<{len(first) // 4}i", first)
+    if (words[0] != 0x5445434D or words[2] not in (1, 2) or words[1] & 1 or
+            len(first) != {1: 80, 2: 104}[words[2]]):
         raise ValueError("Commissioning identity or sequence is invalid")
     if words[4] > 6 or words[5] & ~0x3F or words[12] > 9:
         raise ValueError("Commissioning state, flags, or fault code is invalid")
@@ -112,20 +114,42 @@ def consistent_commissioning(first: bytes, second: bytes) -> dict:
         raise ValueError("Commissioning ADC values are invalid")
     # An idle block may contain its zero-initialized values before preparation.
     # Every active or finished attempt must identify the fixed test profile.
-    expected_profile = ((6, 15000),)
-    if any(words[index] not in ((0, expected) if words[4] == 0 else (expected,))
-           for index, expected in expected_profile):
+    if words[6] not in ((0, 15000) if words[4] == 0 else (15000,)):
         raise ValueError("Commissioning test profile is invalid")
+    extension = dict.fromkeys(("kind", "control_target_c", "guard_floor_c", "control_duty",
+                               "control_state", "control_state_name", "plate_c"))
+    if words[2] == 2:
+        kind = words[20]
+        if kind > 6 or words[23] > 417 or words[24] > 2:
+            raise ValueError("Commissioning control fields are invalid")
+        if signed[21] != (27000 if kind in (5, 6) else INVALID):
+            raise ValueError("Commissioning control target is invalid")
+        if kind < 5 and (words[23] != 0 or words[24] != 0):
+            raise ValueError("Inactive commissioning control must report zero duty")
+        extension.update({
+            "kind": kind,
+            "control_target_c": None if signed[21] == INVALID else signed[21] / 1000,
+            "guard_floor_c": None if signed[22] == INVALID else signed[22] / 1000,
+            "control_duty": words[23] / 1000, "control_state": words[24],
+            "control_state_name": {0: "inactive", 1: "cooling", 2: "holding"}[words[24]],
+            "plate_c": None if signed[25] == INVALID else signed[25] / 1000,
+        })
     if words[4] == 0:
         valid_timing = (words[13] in (0, 1000) and words[14] in (0, 1000) and
-                        words[15] in (0, 20))
+                        words[15] in (0, 20) and extension["kind"] in (None, 0))
+    elif words[2] == 2:
+        kind = words[20]
+        expected_timing = ((1000, 1000, 20) if kind <= 2 else
+                           (30000, 5000, 12) if kind <= 4 else (300000, 5000, 12))
+        valid_timing = ((words[13], words[14], words[15]) == expected_timing and
+                        (kind <= 2 or words[4] in (4, 5, 6)))
     else:
         allowed_timings = (((1000, 1000, 20), (30000, 5000, 12))
                            if words[4] in (4, 5, 6) else ((1000, 1000, 20),))
         valid_timing = (words[13], words[14], words[15]) in allowed_timings
     if not valid_timing:
         raise ValueError("Commissioning test timing profile is invalid")
-    min_plate_mc = struct.unpack_from("<i", first, 68)[0]
+    min_plate_mc = signed[17]
     return {
         "valid": True, "schema": words[2], "sequence": words[1], "uptime_ms": words[3],
         "state": words[4], "state_name": {
@@ -142,6 +166,7 @@ def consistent_commissioning(first: bytes, second: bytes) -> dict:
         "elapsed_ms": words[16],
         "min_plate_c": None if min_plate_mc == INVALID else min_plate_mc / 1000,
         "trip_adc": words[18], "trip_timer_us": words[19],
+        **extension,
     }
 
 

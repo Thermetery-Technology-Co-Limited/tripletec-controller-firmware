@@ -407,7 +407,7 @@ int main(void)
     usb_protocol_init(&usb_protocol, usb_apply, usb_snapshot, usb_enqueue, NULL);
     usb_enabled = usb_device_init();
     usb_session_generation = usb_device_session_generation();
-    board_uart_write("TripleTECDriver bench firmware: dew point +3C; bench lock ON; hardware/current gates retained.\r\n");
+    board_uart_write("TripleTECDriver v0.5.0: supervised fixed27C available; dew guard separate; bench lock ON.\r\n");
 
     for (;;) {
         uint32_t now = board_millis();

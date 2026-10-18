@@ -2,6 +2,10 @@
 
 Firmware and a desktop GUI for the STM32F103RCT6 cooler controller. Regulated mode uses **target = max(0°C, dew point + 3°C)** by default. Unregulated mode requests maximum cooling and deliberately bypasses the dew-point target. Normal control remains inhibited; selecting a mode cannot enable the power stage. A separate supervised TEC1 commissioning path can emit bounded, current-monitored pulses.
 
+Version **0.5.0** adds **Hold TEC1 at 27°C (5 min max)**. This supervised mode uses a fixed **27.0°C control setpoint** and probe 1 feedback; the dew-point margin remains a separate safety floor. It tapers cooling near the setpoint, switches off at or below 27.0°C and automatically resumes at 27.2°C. Below the setpoint it waits without heating. The setpoint is never silently raised to follow humidity: if 27°C is no longer safely above the dew-point floor, the session stops. Temperature precision and overshoot depend on the probe, copper block and thermal response and require a powered holding trial.
+
+The hold session retains the provisional **15A shutdown trip**, a **41.7% maximum duty**, the live-link lease and fresh-sensor checks. It expires after five minutes or stops on STOP/fault/disconnect. Keep the bench lock ON; prepare zero current and verify shutdown before the separate hold click. Every pulse is independently capped at 5ms, starts at least 12ms apart and uses pulse-density modulation to reduce average power. TEC2/3 remain off. Connecting or opening the GUI never starts a hold session. Normal ARM and full commissioning remain inhibited; the separate hold telemetry reports setpoint, dew-point floor, demand and cooling/holding state.
+
 Version 0.3.0 adds direct USB CDC control and a USB-first desktop connection option. The USB firmware is flashed, the clocks and SWD fallback are verified, but direct USB enumeration remains unverified: no STM32 USB device appears even after a known data-cable replug. The schematic omits the required external D+ pull-up. Keep the Pico connected until the hardware requirement and USB-only tests in [USB_CONTROL.md](USB_CONTROL.md) are complete.
 
 ## Desktop GUI

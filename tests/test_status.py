@@ -31,6 +31,19 @@ def commissioning_frame(**overrides):
     return struct.pack("<20I", *words)
 
 
+def commissioning_v2_frame(**overrides):
+    extension_fields = ("kind", "control_target_mc", "guard_floor_mc", "control_duty_milli",
+                        "control_state", "plate_mc")
+    extension_values = [2, status.INVALID, 22000, 0, 0, 27300]
+    base_overrides = {name: value for name, value in overrides.items() if name not in extension_fields}
+    words = list(struct.unpack("<20I", commissioning_frame(**base_overrides)))
+    words[2] = 2
+    for field, value in overrides.items():
+        if field in extension_fields:
+            extension_values[extension_fields.index(field)] = value
+    return struct.pack("<26I", *(words + [value & 0xFFFFFFFF for value in extension_values]))
+
+
 class StatusTest(unittest.TestCase):
     def test_units_and_invalid_sentinel(self):
         result = status.decode(frame())
@@ -163,6 +176,9 @@ class StatusTest(unittest.TestCase):
         self.assertEqual(result["min_plate_c"], 27.3)
         self.assertEqual(result["trip_adc"], 2539)
         self.assertEqual(result["trip_timer_us"], 37)
+        for field in ("kind", "control_target_c", "guard_floor_c", "control_duty",
+                      "control_state", "control_state_name", "plate_c"):
+            self.assertIsNone(result[field], field)
 
     def test_commissioning_flag_bits_and_state_names(self):
         flags = ("zero_valid", "trip_verified", "selftest_passed", "drive",
@@ -251,6 +267,93 @@ class StatusTest(unittest.TestCase):
             for snapshots in ((first, other), (other, first), (other, other)):
                 with self.subTest(size=size), self.assertRaises(ValueError):
                     status.consistent_commissioning(*snapshots)
+
+    def test_commissioning_schema_two_decodes_hold_control_and_first_payload(self):
+        first = commissioning_v2_frame(kind=5, duration_ms=300000, on_us=5000, period_ms=12,
+                                       control_target_mc=27000, guard_floor_mc=22345,
+                                       control_duty_milli=417, control_state=1, plate_mc=27654)
+        second = commissioning_v2_frame(kind=99, plate_mc=100000)
+        result = status.consistent_commissioning(first, second)
+        self.assertEqual(result["schema"], 2)
+        self.assertEqual(result["kind"], 5)
+        self.assertEqual(result["duration_ms"], 300000)
+        self.assertEqual(result["control_target_c"], 27)
+        self.assertEqual(result["guard_floor_c"], 22.345)
+        self.assertEqual(result["control_duty"], 0.417)
+        self.assertEqual(result["control_state"], 1)
+        self.assertEqual(result["control_state_name"], "cooling")
+        self.assertEqual(result["plate_c"], 27.654)
+
+    def test_commissioning_schema_two_temperature_sentinels_and_control_states(self):
+        for control_state, name in enumerate(("inactive", "cooling", "holding")):
+            payload = commissioning_v2_frame(kind=6, duration_ms=300000, on_us=5000, period_ms=12,
+                control_target_mc=27000, guard_floor_mc=-1234, plate_mc=status.INVALID,
+                control_state=control_state)
+            result = status.consistent_commissioning(payload, payload)
+            self.assertEqual(result["control_state_name"], name)
+            self.assertEqual(result["guard_floor_c"], -1.234)
+            self.assertIsNone(result["plate_c"])
+        payload = commissioning_v2_frame(guard_floor_mc=status.INVALID, plate_mc=-500)
+        result = status.consistent_commissioning(payload, payload)
+        self.assertIsNone(result["control_target_c"])
+        self.assertIsNone(result["guard_floor_c"])
+        self.assertEqual(result["plate_c"], -0.5)
+
+    def test_commissioning_schema_two_validates_exact_kind_profiles(self):
+        for kind in range(7):
+            expected_timing = ((1000, 1000, 20) if kind <= 2 else
+                               (30000, 5000, 12) if kind <= 4 else (300000, 5000, 12))
+            expected_target = 27000 if kind >= 5 else status.INVALID
+            for state in range(1, 7):
+                payload = commissioning_v2_frame(kind=kind, state=state,
+                    duration_ms=expected_timing[0], on_us=expected_timing[1],
+                    period_ms=expected_timing[2], control_target_mc=expected_target)
+                with self.subTest(kind=kind, state=state):
+                    if kind <= 2 or state in (4, 5, 6):
+                        self.assertEqual(status.consistent_commissioning(payload, payload)["kind"], kind)
+                    else:
+                        with self.assertRaises(ValueError):
+                            status.consistent_commissioning(payload, payload)
+            for field in ("duration_ms", "on_us", "period_ms"):
+                values = dict(zip(("duration_ms", "on_us", "period_ms"), expected_timing))
+                values[field] += 1
+                payload = commissioning_v2_frame(kind=kind, control_target_mc=expected_target, **values)
+                with self.subTest(kind=kind, field=field), self.assertRaises(ValueError):
+                    status.consistent_commissioning(payload, payload)
+
+    def test_commissioning_schema_two_accepts_idle_zero_and_prepared_profile(self):
+        idle = commissioning_v2_frame(state=0, kind=0, flags=0, trip_ma=0, duration_ms=0,
+                                      on_us=0, period_ms=0, plate_mc=status.INVALID)
+        self.assertEqual(status.consistent_commissioning(idle, idle)["kind"], 0)
+        prepared = commissioning_v2_frame(state=1, kind=0)
+        self.assertEqual(status.consistent_commissioning(prepared, prepared)["state_name"], "prepared")
+
+    def test_commissioning_schema_two_rejects_control_values_and_profile_mismatches(self):
+        for changes in ({"kind": 7}, {"control_target_mc": 27000}, {"control_state": 3},
+                        {"control_duty_milli": 418}, {"control_state": 1}, {"control_duty_milli": 1},
+                        {"duration_ms": 30000, "on_us": 5000, "period_ms": 12}):
+            payload = commissioning_v2_frame(**changes)
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                status.consistent_commissioning(payload, payload)
+        for kind in (5, 6):
+            for changes in ({"control_target_mc": status.INVALID}, {"control_target_mc": 26999},
+                            {"control_duty_milli": 418}, {"control_state": 3},
+                            {"duration_ms": 30000}, {"on_us": 1000}, {"period_ms": 20}):
+                payload = commissioning_v2_frame(**{"kind": kind, "duration_ms": 300000,
+                    "on_us": 5000, "period_ms": 12, "control_target_mc": 27000, **changes})
+                with self.subTest(kind=kind, changes=changes), self.assertRaises(ValueError):
+                    status.consistent_commissioning(payload, payload)
+
+    def test_commissioning_schema_two_rejects_torn_truncated_and_schema_length_mismatches(self):
+        payload = commissioning_v2_frame()
+        for other in (payload[:80], payload[:100], payload + bytes(4), commissioning_v2_frame(sequence=4)):
+            with self.subTest(length=len(other)), self.assertRaises(ValueError):
+                status.consistent_commissioning(payload, other)
+        for schema, data in ((1, payload), (2, commissioning_frame()), (3, payload)):
+            changed = bytearray(data)
+            struct.pack_into("<I", changed, 8, schema)
+            with self.subTest(schema=schema, length=len(data)), self.assertRaises(ValueError):
+                status.consistent_commissioning(changed, changed)
 
 
 if __name__ == "__main__":

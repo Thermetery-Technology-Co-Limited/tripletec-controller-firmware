@@ -78,8 +78,14 @@ typedef struct {
     uint32_t elapsed_ms;
     int32_t min_plate_mc;
     uint32_t trip_adc, trip_timer_us;
+    /* Schema 2: fixed-temperature commissioning is distinct from dew protection.
+     * Duty is the pulse-density request, not the normal-controller duty field. */
+    uint32_t kind;
+    int32_t control_target_mc, guard_floor_mc;
+    uint32_t control_duty_milli, control_state; /* 0 inactive, 1 cooling, 2 holding */
+    int32_t plate_mc;
 } commission_telemetry_t;
-_Static_assert(sizeof(commission_telemetry_t) == 80U, "commission telemetry layout changed");
+_Static_assert(sizeof(commission_telemetry_t) == 104U, "commission telemetry layout changed");
 extern volatile commission_telemetry_t g_commissioning;
 
 #endif

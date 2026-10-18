@@ -101,7 +101,7 @@ def firmware(cc: str) -> None:
     diagnostic_address, diagnostic_size = addresses["g_adc_diagnostics"]
     limit_address, limit_size = addresses["g_limit_configuration"]
     commissioning_address, commissioning_size = addresses["g_commissioning"]
-    if size != 160 or mailbox_size != 32 or diagnostic_size != 32 or limit_size != 32 or commissioning_size != 80:
+    if size != 160 or mailbox_size != 32 or diagnostic_size != 32 or limit_size != 32 or commissioning_size != 104:
         raise SystemExit("Firmware telemetry/mailbox layout changed; update the host protocol.")
     metadata = {"address": address, "size": size, "schema": 2,
                 "mailbox_address": mailbox_address, "mailbox_size": mailbox_size,

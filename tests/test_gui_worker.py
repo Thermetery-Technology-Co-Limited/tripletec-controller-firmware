@@ -43,6 +43,13 @@ def completed_commissioning_status(**changes):
                                     **changes})
 
 
+def hold_commissioning_status(**changes):
+    return commissioning_status(**{"schema": 2, "state": 3, "flags": 23,
+        "trip_verified": True, "kind": 0, "control_target_c": None,
+        "guard_floor_c": 21.6, "control_duty": 0, "control_state": 0,
+        "plate_c": 26, **changes})
+
+
 class FakeLink:
     def __init__(self):
         self.closed = False
@@ -195,7 +202,7 @@ class WorkerTest(unittest.TestCase):
     def test_commissioning_commands_use_selected_swd_once(self):
         self.connect("swd")
         for command in (("commission_prepare", 15000), ("commission_test", 1),
-                        ("commission_test", 2), ("commission_test", 3)):
+                        ("commission_test", 2), ("commission_test", 3), ("commission_test", 5)):
             with self.subTest(command=command):
                 self.worker.submit(0, "command", [command])
                 generation, kind, (origin, result) = self.event()
@@ -203,14 +210,14 @@ class WorkerTest(unittest.TestCase):
                 self.assertEqual(result["transport"], "swd")
         self.assertEqual(self.link.commands, [("commission_prepare", 15000),
                                              ("commission_test", 1), ("commission_test", 2),
-                                             ("commission_test", 3)])
+                                             ("commission_test", 3), ("commission_test", 5)])
         self.assertEqual(self.open_link.call_count, 1)
         self.assertEqual(self.link.pulse_calls, 0)
 
     def test_commissioning_commands_never_touch_usb(self):
         self.connect("usb")
         for command in (("commission_prepare", 15000), ("commission_test", 1),
-                        ("commission_test", 2), ("commission_test", 3)):
+                        ("commission_test", 2), ("commission_test", 3), ("commission_test", 5)):
             with self.subTest(command=command):
                 self.worker.submit(0, "command", [command])
                 self.assertEqual(self.event()[1], "error")
@@ -221,7 +228,7 @@ class WorkerTest(unittest.TestCase):
     def test_uncertain_commissioning_command_has_no_retry_fallback_or_next_step(self):
         self.connect("swd")
         for requested in (("commission_prepare", 15000), ("commission_test", 1),
-                          ("commission_test", 2), ("commission_test", 3)):
+                          ("commission_test", 2), ("commission_test", 3), ("commission_test", 5)):
             with self.subTest(command=requested), patch.object(
                     self.link, "command", side_effect=RuntimeError("uncertain")) as command:
                 self.worker.submit(0, "command", [requested])
@@ -243,6 +250,12 @@ class WorkerTest(unittest.TestCase):
         for duration in (1000, 30000):
             reported = commissioning_bench_status(commissioning=completed_commissioning_status(
                 duration_ms=duration))
+            with patch.object(self.link, "read_status", return_value=reported):
+                self.worker.submit(0, "poll")
+                self.assertEqual(self.event()[1], "status")
+        for control_state in (1, 2):
+            reported = commissioning_bench_status(commissioning=hold_commissioning_status(
+                state=4, kind=5, control_target_c=27, control_state=control_state))
             with patch.object(self.link, "read_status", return_value=reported):
                 self.worker.submit(0, "poll")
                 self.assertEqual(self.event()[1], "status")
@@ -457,7 +470,7 @@ class CommissioningControlsTest(unittest.TestCase):
         self.assertIsNone(self.reason("run", verified))
 
     def test_every_action_requires_supported_fresh_live_swd_state(self):
-        for action in ("prepare", "verify", "run", "observe"):
+        for action in ("prepare", "verify", "run", "observe", "hold"):
             for option in ({"connected": False}, {"transport": "usb"}, {"demo": True},
                            {"now": 104.0}, {"command_pending": True}, {"last_error": "uncertain"}):
                 with self.subTest(action=action, option=option):
@@ -491,12 +504,51 @@ class CommissioningControlsTest(unittest.TestCase):
                 self.assertIsNotNone(self.reason("observe", commissioning_bench_status(
                     commissioning={**verified, **changes})))
 
+    def test_hold_starts_below_or_above_setpoint_with_healthy_dewpoint_clearance(self):
+        for plate in (26, 27.1):
+            data = commissioning_bench_status(plate_c=[plate, None, None],
+                commissioning=hold_commissioning_status(plate_c=plate))
+            with self.subTest(plate=plate):
+                self.assertIsNone(self.reason("hold", data))
+
+    def test_hold_requires_fixed_temperature_support_preparation_and_verified_trip(self):
+        for changes in ({"schema": 1}, {"zero_valid": False}, {"selftest_passed": False},
+                        {"trip_verified": False}, {"kind": 7}, {"control_state": 3},
+                        {"control_duty": 0.418}):
+            data = commissioning_bench_status(commissioning=hold_commissioning_status(**changes))
+            with self.subTest(changes=changes):
+                self.assertIsNotNone(self.reason("hold", data))
+
+    def test_hold_requires_plate_and_setpoint_above_guard_floor_plus_one(self):
+        for plate in (21.6, 22.6):
+            data = commissioning_bench_status(plate_c=[plate, None, None],
+                commissioning=hold_commissioning_status(plate_c=plate))
+            with self.subTest(plate=plate):
+                self.assertIsNotNone(self.reason("hold", data))
+        data = commissioning_bench_status(target_c=26, plate_c=[28, None, None],
+            commissioning=hold_commissioning_status(guard_floor_c=26, plate_c=28))
+        self.assertIn("27 °C hold target", self.reason("hold", data))
+
+    def test_hold_is_operator_only_swd_action_and_every_common_gate_applies(self):
+        data = commissioning_bench_status(commissioning=hold_commissioning_status())
+        for changes in ({"connected": False}, {"transport": "usb"}, {"demo": True},
+                        {"now": 104}, {"command_pending": True}, {"last_error": "uncertain"}):
+            with self.subTest(changes=changes):
+                self.assertIsNotNone(self.reason("hold", data, **changes))
+        for changes in ({"valid_flags": 0x67}, {"outputs_locked_off": False}, {"armed_mask": 1},
+                        {"mode": 1}, {"margin_c": 2.999}, {"applied_duty": [0.1, 0, 0]},
+                        {"desired_duty": [0.1, 0, 0]}, {"plate_c": [None] * 3},
+                        {"active_faults": [6150 | 16, 16, 16]}):
+            with self.subTest(changes=changes):
+                self.assertIsNotNone(self.reason("hold", {**data, **changes}))
+
     def test_operator_click_submits_exact_action_once_without_optimistic_state(self):
         for action, command in (("prepare", ("commission_prepare", 15000)),
                                 ("verify", ("commission_test", 1)), ("run", ("commission_test", 2)),
-                                ("observe", ("commission_test", 3))):
+                                ("observe", ("commission_test", 3)), ("hold", ("commission_test", 5))):
             with self.subTest(action=action):
-                commissioned = commissioning_status(state=3, flags=23, trip_verified=True)
+                commissioned = (hold_commissioning_status() if action == "hold" else
+                                commissioning_status(state=3, flags=23, trip_verified=True))
                 dashboard = self.dashboard(commissioning=commissioned)
                 before = dashboard.snapshot
                 with patch.object(app.time, "monotonic", return_value=101.0):
@@ -523,6 +575,11 @@ class CommissioningControlsTest(unittest.TestCase):
                 duration_ms=duration))
             with patch.object(app.time, "monotonic", return_value=101.0):
                 dashboard._accept_status(reported)
+        for control_state in (0, 1, 2):
+            reported = commissioning_bench_status(commissioning=hold_commissioning_status(
+                state=4, kind=5, control_target_c=27, control_state=control_state))
+            with patch.object(app.time, "monotonic", return_value=101.0):
+                dashboard._accept_status(reported)
         dashboard.worker.submit.assert_not_called()
         self.assertFalse(dashboard.command_pending)
 
@@ -530,12 +587,12 @@ class CommissioningControlsTest(unittest.TestCase):
         dashboard = self.dashboard(commissioning="unsupported")
         for name in ("apply_button", "margin_entry", "reported_mode", "reason", "start_button",
                      "stop_button", "commission_stop_button", "bench_lock_state", "bench_lock_button", "test_tec1_button",
-                     "note", "note_label"):
+                     "note", "note_label", "regulation_status"):
             setattr(dashboard, name, Mock())
         dashboard.mode = Mock()
         dashboard.mode.get.return_value = 0
         dashboard.mode_buttons = [Mock(), Mock()]
-        dashboard.commission_buttons = {action: Mock() for action in ("prepare", "verify", "run", "observe")}
+        dashboard.commission_buttons = {action: Mock() for action in ("prepare", "verify", "run", "observe", "hold")}
         with patch.object(app.time, "monotonic", return_value=101.0):
             app.Dashboard._render_controls(dashboard)
         dashboard.stop_button.configure.assert_called_once_with(state="normal")
@@ -563,13 +620,43 @@ class CommissioningControlsTest(unittest.TestCase):
 
     def test_result_reports_run_duration_only_for_running_and_finished_attempts(self):
         for state in (4, 5, 6):
-            for duration in (1000, 30000):
+            for duration in (1000, 30000, 300000):
                 text = app.commissioning_result_text(commissioning_status(state=state, duration_ms=duration))
                 with self.subTest(state=state, duration=duration):
                     self.assertIn(f"{duration // 1000} s maximum", text)
         for state in (0, 1, 2, 3):
             text = app.commissioning_result_text(commissioning_status(state=state, duration_ms=1000))
             self.assertNotIn("s maximum", text)
+
+    def test_regulation_display_separates_control_target_guard_demand_and_plate(self):
+        for state, label, duty, demand in ((1, "Cooling", 0.417, "41.7 %"),
+                                          (2, "Holding, cooling OFF", 0, "0.0 %")):
+            sample = app.Snapshot.from_status(commissioning_bench_status(commissioning=
+                hold_commissioning_status(state=4, kind=5, control_target_c=27,
+                    control_state=state, control_duty=duty, plate_c=26.8)), 100)
+            text = app.regulation_status_text(sample)
+            self.assertIn("Hold target 27.0 °C", text)
+            self.assertIn("Dew-point safety floor 21.6 °C", text)
+            self.assertIn(label, text)
+            self.assertIn("Demand " + demand + " / 41.7% cap", text)
+            self.assertIn("Plate 26.8 °C", text)
+        ready = app.Snapshot.from_status(commissioning_bench_status(
+            commissioning=hold_commissioning_status()), 100)
+        self.assertIn("Regulation inactive", app.regulation_status_text(ready))
+        self.assertIn("Hold target 27.0 °C", app.regulation_status_text(None))
+
+    def test_inactive_hold_uses_current_guard_and_does_not_claim_target_reached(self):
+        held = hold_commissioning_status(state=4, kind=5, control_target_c=27,
+                                        control_state=2, control_duty=0, plate_c=26.44)
+        result_text = app.commissioning_result_text(held)
+        self.assertIn("cooling OFF until above 27.2 °C", result_text)
+        self.assertNotIn("Holding at 27", result_text)
+        finished = {**held, "state": 5}
+        sample = app.Snapshot.from_status(commissioning_bench_status(
+            target_c=24.5, commissioning=finished), 100)
+        text = app.regulation_status_text(sample)
+        self.assertIn("Dew-point safety floor 24.5 °C", text)
+        self.assertNotIn("21.6 °C", text)
 
 
 class LinkSelectionTest(unittest.TestCase):

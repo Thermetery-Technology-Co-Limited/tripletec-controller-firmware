@@ -24,7 +24,7 @@ static bool prepare_ok, selftest_ok, pin_ok, pulse_ok;
 static uint16_t prepared_baseline, prepared_delta;
 static uint32_t prepared_period, prepared_on_us;
 static bool prepared_drive;
-static uint32_t pulse_times[8192];
+static uint32_t pulse_times[32768];
 
 bool board_adc_read_diagnostics(board_adc_diagnostics_t *sample, uint32_t timeout_ms)
 {
@@ -39,7 +39,12 @@ bool board_adc_read_diagnostics(board_adc_diagnostics_t *sample, uint32_t timeou
 }
 
 uint32_t board_millis(void) { return now_ms; }
-void board_outputs_force_off(void) { ++off_calls; }
+void board_outputs_force_off(void)
+{
+    ++off_calls;
+    stage.pin_low = true;
+    stage.timer_running = false;
+}
 
 bool commission_stage_prepare(uint16_t baseline, uint16_t delta, bool drive)
 {
@@ -92,9 +97,10 @@ static commission_telemetry_t snapshot(void)
     commission_telemetry_t result;
     memset(&result, 0, sizeof(result));
     commissioning_snapshot(&result, now_ms);
-    assert(result.magic == 0x5445434dU && result.schema == 1U);
+    assert(result.magic == 0x5445434dU && result.schema == 2U);
     assert((result.duration_ms == 1000U && result.on_us == 1000U && result.period_ms == 20U) ||
-           (result.duration_ms == 30000U && result.on_us == 5000U && result.period_ms == 12U));
+           (result.duration_ms == 30000U && result.on_us == 5000U && result.period_ms == 12U) ||
+           (result.duration_ms == 300000U && result.on_us == 5000U && result.period_ms == 12U));
     return result;
 }
 
@@ -145,9 +151,9 @@ static void start(int kind)
 {
     assert(commissioning_start(&inputs, &controller, true, kind, now_ms) == CONTROL_OK);
     assert(commissioning_active() && commissioning_owns_adc());
-    assert(prepared_drive == (kind != 0 && kind != 4));
+    assert(prepared_drive == (kind != 0 && kind != 4 && kind != 6));
     assert(prepared_delta == (kind == 1 ? 163U : 491U));
-    assert(snapshot().duration_ms == (kind >= 3 ? 30000U : 1000U));
+    assert(snapshot().duration_ms == (kind >= 5 ? 300000U : kind >= 3 ? 30000U : 1000U));
     assert(snapshot().period_ms == (kind >= 3 ? 12U : 20U));
     assert(snapshot().on_us == (kind >= 3 ? 5000U : 1000U));
     assert(prepared_period == (kind >= 3 ? 12U : 20U));
@@ -242,7 +248,7 @@ static void test_explicit_commands_and_gates(void)
     assert(commissioning_start(&inputs, &controller, true, 0, now_ms) == CONTROL_INTERLOCK);
     prepare();
     assert(commissioning_start(&inputs, &controller, true, -1, now_ms) == CONTROL_BAD_VALUE);
-    assert(commissioning_start(&inputs, &controller, true, 5, now_ms) == CONTROL_BAD_VALUE);
+    assert(commissioning_start(&inputs, &controller, true, 7, now_ms) == CONTROL_BAD_VALUE);
     assert(commissioning_start(&inputs, &controller, true, 2, now_ms) == CONTROL_INTERLOCK);
     assert(commissioning_start(&inputs, &controller, true, 3, now_ms) == CONTROL_INTERLOCK);
     assert(commissioning_start(&inputs, &controller, false, 0, now_ms) == CONTROL_INTERLOCK);
@@ -487,6 +493,147 @@ static void test_live_guards(void)
     }
 }
 
+static void test_hold27_below_target_and_hysteresis(void)
+{
+    reset(); prepare();
+    inputs.plate[0].temperature_c = 26.5f;
+    assert(commissioning_start(&inputs, &controller, true, 5, now_ms) == CONTROL_INTERLOCK);
+    start(6);
+    assert(!prepared_drive && (snapshot().flags & TEST_DRIVE) == 0U);
+    assert(snapshot().kind == 6U && snapshot().control_target_mc == 27000);
+    assert(snapshot().control_state == 2U && snapshot().control_duty_milli == 0U);
+    assert(snapshot().plate_mc == 26500 && snapshot().guard_floor_mc < 25000);
+    tick(1100U);
+    assert(pulse_calls == 0U && commissioning_active() && stage.prepared);
+    inputs.plate[0].temperature_c = 27.19f;
+    tick(1112U);
+    assert(snapshot().control_state == 2U && snapshot().control_duty_milli == 0U);
+    inputs.plate[0].temperature_c = 27.2f;
+    tick(1124U);
+    assert(snapshot().control_state == 1U && snapshot().control_duty_milli == 0U);
+    tick(2124U);
+    assert(snapshot().control_duty_milli <= 50U);
+    for (uint32_t at = 2136U; at <= 4136U; at += 12U) { tick(at); }
+    assert(pulse_calls > 0U);
+    const unsigned before = pulse_calls;
+    const unsigned stopped_before = off_calls;
+    stage.timer_running = true;
+    stage.pin_low = false;
+    inputs.plate[0].temperature_c = 27.0f;
+    tick(4148U);
+    assert(off_calls > stopped_before && !stage.timer_running && stage.pin_low);
+    assert(stage.prepared); /* Abort the pulse without losing the ADC monitor. */
+    assert(snapshot().control_state == 2U && snapshot().control_duty_milli == 0U);
+    assert(pulse_calls == before);
+    inputs.plate[0].temperature_c = 27.19f;
+    for (uint32_t at = 4160U; at < 5160U; at += 12U) { tick(at); }
+    assert(pulse_calls == before); /* Holding cleared accumulated pulse credit. */
+}
+
+static void test_hold27_slew_taper_and_no_burst(void)
+{
+    verify_trip();
+    inputs.plate[0].temperature_c = 31.0f;
+    start(5);
+    assert(prepared_drive && snapshot().kind == 5U && snapshot().control_target_mc == 27000);
+    const tec_config_t config = controller.config;
+    const uint32_t started = now_ms;
+    uint32_t previous = 0U;
+    for (uint32_t at = started + 12U; at <= started + 12000U; at += 12U) {
+        tick(at);
+        const uint32_t demand = snapshot().control_duty_milli;
+        assert(demand <= 417U);
+        assert(demand <= previous + 1U); /* <=0.0006 duty per12ms, rounded. */
+        assert(demand <= (at - started) / 20U + 1U); /* <=0.05 duty/second overall. */
+        previous = demand;
+    }
+    assert(snapshot().control_duty_milli == 417U);
+    const unsigned before_delay = pulse_calls;
+    tick(started + 12500U);
+    assert(pulse_calls == before_delay + 1U); /* One opportunity after delay. */
+    tick(started + 12500U);
+    tick(started + 12511U);
+    assert(pulse_calls == before_delay + 1U);
+    tick(started + 12512U);
+    assert(pulse_calls == before_delay + 2U);
+    inputs.plate[0].temperature_c = 27.1f;
+    tick(started + 12524U);
+    assert(snapshot().control_duty_milli <= 21U); /* No wind-up while capped. */
+    assert(snapshot().control_state == 1U);
+    for (unsigned i = 2U; i < pulse_calls; ++i) {
+        assert(pulse_times[i] - pulse_times[i - 1U] >= 12U);
+    }
+    assert_normal_policy_unchanged(&config);
+}
+
+static void test_hold27_five_minute_timeout(void)
+{
+    reset(); prepare(); start(6);
+    const uint32_t started = now_ms;
+    for (uint32_t at = started + 12U; at < started + 300000U; at += 12U) { tick(at); }
+    assert(commissioning_active() && !prepared_drive);
+    assert(pulse_calls > 1000U && pulse_calls <= 25000U);
+    tick(started + 300000U);
+    assert(snapshot().state == TEST_COMPLETE && snapshot().elapsed_ms == 300000U);
+    assert(snapshot().kind == 6U && snapshot().control_target_mc == 27000);
+    assert(snapshot().control_state == 0U && snapshot().control_duty_milli == 0U);
+    assert(snapshot().guard_floor_mc > 0 && snapshot().plate_mc == 28000);
+    const unsigned stopped = pulse_calls;
+    tick(started + 300012U);
+    assert(pulse_calls == stopped && !commissioning_active());
+}
+
+static void test_hold27_dew_and_liveness_guards(void)
+{
+    reset(); prepare();
+    /* A below-target plate can start safely just above its independent floor. */
+    controller.config.absolute_min_c = 25.0f;
+    inputs.plate[0].temperature_c = 26.4f;
+    start(6);
+    assert(snapshot().control_target_mc == 27000 && snapshot().guard_floor_mc == 25000);
+    inputs.plate[0].temperature_c = 25.5f;
+    tick(112U);
+    assert(snapshot().state == TEST_FAULT && snapshot().fault_code == 5U);
+
+    reset(); prepare();
+    controller.config.absolute_min_c = 26.0f;
+    assert(commissioning_start(&inputs, &controller, true, 6, now_ms) == CONTROL_INTERLOCK);
+    reset(); prepare(); start(6);
+    inputs.rh_percent = 70.0f;
+    inputs.plate[0].temperature_c = 31.0f;
+    tick(112U);
+    assert(snapshot().state == TEST_FAULT && snapshot().fault_code == 5U);
+    assert(snapshot().control_target_mc == 27000 && snapshot().guard_floor_mc > 26000);
+    assert(snapshot().control_target_mc != snapshot().guard_floor_mc);
+
+    reset(); prepare();
+    inputs.plate[0].temperature_c = 26.5f;
+    start(6);
+    now_ms = 501U;
+    inputs.ambient_timestamp_ms = now_ms;
+    commissioning_tick(&inputs, &controller, true, now_ms, now_ms);
+    assert(snapshot().state == TEST_FAULT && snapshot().fault_code == 6U);
+
+    reset(); prepare();
+    inputs.plate[0].temperature_c = 26.5f;
+    start(6);
+    const uint32_t started = now_ms;
+    refresh(started + 1501U);
+    commissioning_tick(&inputs, &controller, true, now_ms, started);
+    assert(snapshot().state == TEST_FAULT && snapshot().fault_code == 7U);
+
+    verify_trip(); start(5);
+    stage.tripped = true;
+    stage.trip_adc = prepared_baseline + 491U;
+    tick(now_ms + 12U);
+    assert(snapshot().state == TEST_FAULT && snapshot().fault_code == 4U);
+    stage.tripped = false;
+    const unsigned before = pulse_calls;
+    tick(now_ms + 1000U);
+    assert(pulse_calls == before && !commissioning_active());
+    assert(commissioning_start(&inputs, &controller, true, 5, now_ms) == CONTROL_INTERLOCK);
+}
+
 int main(void)
 {
     test_zero_sampling_and_policy();
@@ -499,6 +646,10 @@ int main(void)
     test_thirty_second_gpio_low_preflight();
     test_zero_evidence_expiry();
     test_live_guards();
+    test_hold27_below_target_and_hysteresis();
+    test_hold27_slew_taper_and_no_burst();
+    test_hold27_five_minute_timeout();
+    test_hold27_dew_and_liveness_guards();
     puts("commissioning engine tests passed");
     return 0;
 }

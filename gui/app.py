@@ -57,7 +57,7 @@ def tec1_test_block_reason(sample, *, connected, transport, now,
 
 def commissioning_block_reason(sample, action, *, connected, transport, now,
                                command_pending=False, last_error=None, demo=False):
-    if action not in ("prepare", "verify", "run", "observe"):
+    if action not in ("prepare", "verify", "run", "observe", "hold"):
         return "Unsupported commissioning action."
     reason = tec1_test_block_reason(
         sample, connected=connected, transport=transport, now=now,
@@ -75,8 +75,13 @@ def commissioning_block_reason(sample, action, *, connected, transport, now,
     if action != "prepare" and not (commissioning.get("zero_valid") and
                                     commissioning.get("selftest_passed")):
         return "Prepare TEC1 and zero current before the shutdown test."
-    if action in ("run", "observe") and not commissioning.get("trip_verified"):
+    if action in ("run", "observe", "hold") and not commissioning.get("trip_verified"):
         return "Verify the 5 A shutdown path before the guarded 15 A run."
+    if action == "hold":
+        if commissioning.get("schema") != 2:
+            return "Load firmware with fixed-temperature TEC1 regulation support."
+        if 27 <= sample.target_c + 1:
+            return "The 27 °C hold target must exceed the dew-point safety floor by more than 1 °C."
     return None
 
 
@@ -88,6 +93,12 @@ def commissioning_result_text(commissioning):
               5: "Run complete; outputs OFF", 6: "Stopped with a fault"}
     state = commissioning.get("state")
     text = states.get(state, "Unknown state")
+    if state == 4 and commissioning.get("kind") in (5, 6):
+        text = {0: "27 °C controller active", 1: "Cooling toward 27 °C",
+                2: "Holding; cooling OFF until above 27.2 °C"}.get(commissioning.get("control_state"),
+                                                       "27 °C controller state unavailable")
+        if commissioning.get("kind") == 6:
+            text = "GPIO-low dry run · " + text
     if commissioning.get("zero_valid"):
         text += f" · zero ADC {commissioning.get('baseline_adc', '—')}"
     if commissioning.get("sample_count", 0) and commissioning.get("zero_valid"):
@@ -95,7 +106,7 @@ def commissioning_result_text(commissioning):
         text += f" · peak {peak:.2f} A nominal"
     if commissioning.get("pulses"):
         text += f" · {commissioning['pulses']} pulse(s)"
-    if commissioning.get("duration_ms") in (1000, 30000) and state in (4, 5, 6):
+    if commissioning.get("duration_ms") in (1000, 30000, 300000) and state in (4, 5, 6):
         text += f" · {commissioning['duration_ms'] / 1000:g} s maximum"
     if state == 6:
         faults = {1: "preflight", 2: "zero current", 3: "power-stage self-test",
@@ -103,6 +114,25 @@ def commissioning_result_text(commissioning):
                   7: "host communication", 8: "operator STOP", 9: "timeout"}
         text += " · " + faults.get(commissioning.get("fault_code"), "unknown fault")
     return text + ". Gain is nominal; full current calibration remains incomplete."
+
+
+def regulation_status_text(sample):
+    """Keep the fixed control setpoint distinct from the condensation guard."""
+    commissioning = sample.commissioning if sample else None
+    valid = commissioning and commissioning.get("valid") is True and commissioning.get("schema") == 2
+    active = valid and commissioning.get("kind") in (5, 6) and commissioning.get("state") == 4
+    floor = commissioning.get("guard_floor_c") if active else None
+    if floor is None:
+        floor = sample.target_c if sample else None
+    text = "Hold target 27.0 °C · Dew-point safety floor " + format_value(floor, " °C")
+    if not active:
+        return text + " · Regulation inactive · 41.7% PWM cap"
+    state = {0: "Inactive", 1: "Cooling", 2: "Holding, cooling OFF"}.get(
+        commissioning.get("control_state"), "State unavailable")
+    duty = commissioning.get("control_duty")
+    demand = format_value(duty * 100 if duty is not None else None, " %")
+    return (text + f" · {state} · Demand {demand} / 41.7% cap · Plate " +
+            format_value(commissioning.get("plate_c"), " °C"))
 
 
 def poll_interval_ms(sample):
@@ -274,6 +304,7 @@ class Dashboard:
         self.tec1_test_result = tk.StringVar(value="TEC1 pulse test has not been run.")
         self.commission_result = tk.StringVar(value="TEC1 commissioning status is unavailable.")
         self.commission_reason = tk.StringVar(value="Connect through Pico SWD to commission TEC1.")
+        self.regulation_status = tk.StringVar(value=regulation_status_text(None))
         self._tick_after_id = None
         self.metric_values = []
         self.channel_values = []
@@ -399,16 +430,19 @@ class Dashboard:
                     self.current_trip_values.append(trip)
                 values.append(value)
             self.channel_values.append((status, values))
-        self._label(channels, "* Nominal current · uncalibrated; — means unavailable. Applied shows normal control; commissioning results are below.",
-                    size=9, color="muted").grid(row=4, column=0, columnspan=5, sticky="w", padx=16, pady=(6, 0))
-        self._label(channels, "Software current trip; peak current requires hardware limiting.",
-                    size=9, color="amber").grid(row=5, column=0, columnspan=5, sticky="w", padx=16, pady=(0, 10))
+        self.current_note_label = self._label(channels, "* Nominal current · uncalibrated; — means unavailable. Applied shows normal control; commissioning results are below.",
+                    size=9, color="muted", wraplength=900)
+        self.current_note_label.grid(row=4, column=0, columnspan=5, sticky="w", padx=16, pady=(6, 0))
+        self.current_safety_label = self._label(channels, "Software current trip; peak current requires hardware limiting.",
+                    size=9, color="amber", wraplength=900)
+        self.current_safety_label.grid(row=5, column=0, columnspan=5, sticky="w", padx=16, pady=(0, 10))
         pulse_actions = tk.Frame(channels, bg=COLORS["panel"])
         pulse_actions.grid(row=6, column=0, columnspan=5, sticky="ew", padx=16, pady=(0, 6))
         self.test_tec1_button = self._button(pulse_actions, "Test TEC1 (1 ms)", self.test_tec1)
         self.test_tec1_button.pack(side="left", padx=(0, 12))
-        self._label(pulse_actions, "Full-voltage 1ms pulse; automatic off. Current protection remains uncommissioned.",
-                    size=9, color="amber", wraplength=650).pack(side="left", fill="x", expand=True)
+        self.pulse_note_label = self._label(pulse_actions, "Full-voltage 1ms pulse; automatic off. Current protection remains uncommissioned.",
+                    size=9, color="amber", wraplength=650)
+        self.pulse_note_label.pack(side="left", fill="x", expand=True)
         self.tec1_test_result_label = self._label(channels, variable=self.tec1_test_result,
                                                  size=9, color="muted", wraplength=1000)
         self.tec1_test_result_label.grid(row=7, column=0, columnspan=5, sticky="w", padx=16, pady=(0, 12))
@@ -416,18 +450,23 @@ class Dashboard:
         commission.grid(row=8, column=0, columnspan=5, sticky="ew", padx=16, pady=(2, 12))
         self._label(commission, "TEC1 COMMISSIONING · 15 A provisional trip", size=10,
                     color="accent", bold=True).pack(anchor="w")
-        self._label(commission, "15 A provisional shutdown trip. Observation: 5 ms pulses every 12 ms (41.7% PWM), 30 s maximum; this is not 5 V DC. Each action requires your click; gain remains nominal.",
-                    size=9, color="amber", wraplength=1000).pack(anchor="w", pady=(3, 6))
+        self.commission_summary_label = self._label(commission, "15 A provisional shutdown trip; gain remains nominal. Hold regulates TEC1 at 27 °C for up to 5 min, with a separate dew-point safety floor and 41.7% PWM cap. Cooling stops at 27 °C and resumes above 27.2 °C. Every action requires your click.",
+                    size=9, color="amber", wraplength=1000)
+        self.commission_summary_label.pack(anchor="w", pady=(3, 6))
         self.commission_buttons = {}
         for action, title in (("prepare", "Prepare TEC1 / zero current"),
                               ("verify", "Verify shutdown (5 A, 1 ms)"),
                               ("run", "Run TEC1 (15 A trip, 1 s max)"),
-                              ("observe", "Observe cooling (41.7%, 30 s max)")):
+                              ("observe", "Observe cooling (41.7%, 30 s max)"),
+                              ("hold", "Hold TEC1 at 27°C (5 min max)")):
             button = self._button(commission, title, lambda value=action: self.commission_tec1(value))
             button.pack(anchor="w", pady=2)
             self.commission_buttons[action] = button
         self.commission_stop_button = self._button(commission, "STOP ALL", self.stop, danger=True)
         self.commission_stop_button.pack(anchor="w", pady=(5, 2))
+        self.regulation_status_label = self._label(commission, variable=self.regulation_status,
+                                                  size=10, color="accent", wraplength=1000)
+        self.regulation_status_label.pack(anchor="w", pady=(6, 2))
         self.commission_result_label = self._label(commission, variable=self.commission_result,
                                                   size=9, color="muted", wraplength=1000)
         self.commission_result_label.pack(anchor="w", pady=(6, 2))
@@ -504,6 +543,10 @@ class Dashboard:
         self.tec1_test_result_label.configure(wraplength=max(500, event.width - 40))
         self.commission_result_label.configure(wraplength=max(500, event.width - 40))
         self.commission_reason_label.configure(wraplength=max(500, event.width - 40))
+        for widget in (self.current_note_label, self.current_safety_label,
+                       self.commission_summary_label, self.regulation_status_label):
+            widget.configure(wraplength=max(300, event.width - 40))
+        self.pulse_note_label.configure(wraplength=max(200, event.width - 60 - self.test_tec1_button.winfo_reqwidth()))
 
     def _is_demo(self):
         return self.source.get() == "Demo (simulated)"
@@ -707,7 +750,7 @@ class Dashboard:
             return
         command = {"prepare": ("commission_prepare", 15000),
                    "verify": ("commission_test", 1), "run": ("commission_test", 2),
-                   "observe": ("commission_test", 3)}[action]
+                   "observe": ("commission_test", 3), "hold": ("commission_test", 5)}[action]
         self.commission_result.set("TEC1 request sent. Waiting for firmware acknowledgement; no automatic next step.")
         self._command([command])
 
@@ -907,6 +950,7 @@ class Dashboard:
                 command_pending=self.command_pending, last_error=self.last_error, demo=demo)
             button.configure(state="normal" if blocked is None else "disabled")
         self.commission_result.set(commissioning_result_text(sample.commissioning if sample else None))
+        self.regulation_status.set(regulation_status_text(sample))
         commission_reason = commissioning_block_reason(
             sample, "prepare", connected=self.connected, transport=self.active_transport, now=now,
             command_pending=self.command_pending, last_error=self.last_error, demo=demo)

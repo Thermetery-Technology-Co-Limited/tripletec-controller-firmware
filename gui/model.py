@@ -119,6 +119,14 @@ class Snapshot:
                     any(type(commissioning.get(name)) is not bool for name in
                         ("zero_valid", "trip_verified", "selftest_passed", "nominal_gain"))):
                 commissioning = {"valid": False, "error": "Unsupported commissioning fields"}
+            elif commissioning.get("valid") is True and commissioning.get("schema") == 2 and (
+                    _integer(commissioning.get("kind"), 0, 6) is None or
+                    _integer(commissioning.get("control_state"), 0, 2) is None or
+                    _number(commissioning.get("control_duty")) is None or
+                    not 0 <= commissioning["control_duty"] <= 0.417 or
+                    (commissioning.get("kind") in (5, 6) and
+                     commissioning.get("control_target_c") != 27)):
+                commissioning = {"valid": False, "error": "Unsupported fixed-temperature control fields"}
         if schema < 2:
             capability = False
         elif valid_flags is not None:

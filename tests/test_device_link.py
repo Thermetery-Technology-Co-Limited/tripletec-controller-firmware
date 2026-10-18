@@ -44,7 +44,7 @@ class FakeOpenOCD:
                 elif address == 0x20000400:
                     data = struct.pack("<8I", *self.limit_words)
                 elif address == 0x20000500:
-                    data = struct.pack("<20I", *self.commission_words)
+                    data = struct.pack(f"<{len(self.commission_words)}I", *self.commission_words)
                 else:
                     data = struct.pack("<40I", *self.words)
                 Path(path).write_bytes(data[:int(size)])
@@ -73,15 +73,22 @@ class FakeOpenOCD:
                             self.words[24:27] = [0, 0, 0]
                         elif mailbox[3] == 7:
                             self.commission_words[4:11] = [1, 21, 15000, 2040, 2049, 2040, 128]
+                            self.commission_words[13:17] = [1000, 1000, 20, 0]
+                            if len(self.commission_words) == 26:
+                                self.commission_words[20:] = [0, 0x80000000, self.words[11], 0, 0, self.words[12]]
                             self.limit_words[4] = 15000
                         elif mailbox[3] == 8:
                             self.commission_words[4:12] = [3 if mailbox[4] == 1 else 5,
-                                                          21 if mailbox[4] in (0, 4) else 23 if mailbox[4] == 1 else 31,
+                                                          21 if mailbox[4] in (0, 4, 6) else 23 if mailbox[4] == 1 else 31,
                                                           15000, 2040, 2321, 2040, 256, 1]
-                            self.commission_words[13] = 30000 if mailbox[4] in (3, 4) else 1000
-                            self.commission_words[14] = 5000 if mailbox[4] in (3, 4) else 1000
-                            self.commission_words[15] = 12 if mailbox[4] in (3, 4) else 20
-                            self.commission_words[16] = self.commission_words[13] if mailbox[4] in (2, 3, 4) else 1
+                            self.commission_words[13] = 300000 if mailbox[4] in (5, 6) else 30000 if mailbox[4] in (3, 4) else 1000
+                            self.commission_words[14] = 5000 if mailbox[4] in (3, 4, 5, 6) else 1000
+                            self.commission_words[15] = 12 if mailbox[4] in (3, 4, 5, 6) else 20
+                            self.commission_words[16] = self.commission_words[13] if mailbox[4] in (2, 3, 4, 5, 6) else 1
+                            if len(self.commission_words) == 26:
+                                self.commission_words[20:] = [mailbox[4],
+                                    27000 if mailbox[4] in (5, 6) else 0x80000000, self.words[11],
+                                    0, 0, self.words[12]]
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
 
@@ -321,12 +328,15 @@ class DeviceLinkTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "echo"):
                 self.link.command("mode", 1)
 
-    def enable_commissioning(self):
+    def enable_commissioning(self, schema=1):
         metadata = json.loads(self.metadata.read_text())
-        metadata.update(commissioning_address=0x20000500, commissioning_size=80)
+        metadata.update(commissioning_address=0x20000500, commissioning_size=104 if schema == 2 else 80)
         self.metadata.write_text(json.dumps(metadata))
         self.fake.words[5] = 0xE7
         self.fake.words[11:13] = [22000, 27000]
+        if schema == 2:
+            self.fake.commission_words[2] = 2
+            self.fake.commission_words.extend([0, 0x80000000, 22000, 0, 0, 27000])
         self.link._record_commissioning = lambda status: None
 
     def test_optional_commissioning_reads_four_validated_snapshots(self):
@@ -393,7 +403,7 @@ class DeviceLinkTest(unittest.TestCase):
     def test_bad_commissioning_values_prevent_probe_access(self):
         for name, value in (("commission_prepare", 0), ("commission_prepare", 14999),
                             ("commission_prepare", True), ("commission_test", -1),
-                            ("commission_test", 5), ("commission_test", False)):
+                            ("commission_test", 7), ("commission_test", False)):
             with self.subTest(name=name, value=value), patch.object(device_link.subprocess, "run", self.fake):
                 with self.assertRaises(RuntimeError):
                     self.link.command(name, value)
@@ -460,6 +470,88 @@ class DeviceLinkTest(unittest.TestCase):
             self.assertFalse(result["commissioning"]["drive"])
             with self.assertRaisesRegex(RuntimeError, "Verify"):
                 self.link.command("commission_test", 3)
+
+    def test_schema_two_reads_extended_control_block_without_halting(self):
+        self.enable_commissioning(schema=2)
+        with patch.object(device_link.subprocess, "run", self.fake):
+            result = self.link.read_status()
+        commissioning = result["commissioning"]
+        self.assertTrue(commissioning["valid"])
+        self.assertEqual(commissioning["schema"], 2)
+        self.assertEqual(commissioning["kind"], 0)
+        self.assertIsNone(commissioning["control_target_c"])
+        self.assertEqual(commissioning["guard_floor_c"], 22)
+        self.assertEqual(sum(command.endswith("0x20000500 104") for command in self.fake.commands), 4)
+        self.assertFalse(any(command.startswith(("mww", "load_image")) for command in self.fake.commands))
+
+    def test_powered_hold_accepts_probe_below_fixed_target_with_verified_trip(self):
+        self.enable_commissioning(schema=2)
+        with patch.object(device_link.subprocess, "run", self.fake):
+            for plate_mc in (26000, 27000, 27300):
+                self.fake.words[12] = plate_mc
+                self.link.command("commission_prepare", 15000)
+                with self.assertRaisesRegex(RuntimeError, "Verify"):
+                    self.link.command("commission_test", 5)
+                self.link.command("commission_test", 1)
+                result = self.link.command("commission_test", 5)
+                commissioning = result["commissioning"]
+                self.assertEqual(struct.unpack("<8I", self.fake.mailbox)[3:5], (8, 5))
+                self.assertEqual(commissioning["kind"], 5)
+                self.assertEqual(commissioning["control_target_c"], 27)
+                self.assertEqual(commissioning["guard_floor_c"], 22)
+                self.assertEqual(commissioning["duration_ms"], 300000)
+                self.assertEqual(commissioning["on_us"], 5000)
+                self.assertEqual(commissioning["period_ms"], 12)
+
+    def test_hold_rejects_old_schema_and_insufficient_dew_point_clearance(self):
+        self.enable_commissioning()
+        with patch.object(device_link.subprocess, "run", self.fake):
+            self.link.command("commission_prepare", 15000)
+            self.link.command("commission_test", 1)
+            for kind in (5, 6):
+                with self.assertRaisesRegex(RuntimeError, "schema 2"):
+                    self.link.command("commission_test", kind)
+        self.fake = FakeOpenOCD()
+        self.enable_commissioning(schema=2)
+        with patch.object(device_link.subprocess, "run", self.fake):
+            self.link.command("commission_prepare", 15000)
+            self.link.command("commission_test", 1)
+            for target_mc, plate_mc in ((26000, 28000), (22000, 23000)):
+                self.fake.words[11:13] = [target_mc, plate_mc]
+                for kind in (5, 6):
+                    before = len(self.fake.commands)
+                    with self.subTest(kind=kind, target_mc=target_mc), self.assertRaises(RuntimeError):
+                        self.link.command("commission_test", kind)
+                    self.assertFalse(any(command.startswith(("mww", "load_image"))
+                                         for command in self.fake.commands[before:]))
+
+    def test_hidden_hold_dry_run_needs_zero_and_selftest_without_trip_proof(self):
+        self.enable_commissioning(schema=2)
+        with patch.object(device_link.subprocess, "run", self.fake):
+            with self.assertRaisesRegex(RuntimeError, "Prepare"):
+                self.link.command("commission_test", 6)
+            self.link.command("commission_prepare", 15000)
+            result = self.link.command("commission_test", 6)
+            commissioning = result["commissioning"]
+            self.assertEqual(commissioning["kind"], 6)
+            self.assertEqual(commissioning["control_target_c"], 27)
+            self.assertEqual(commissioning["duration_ms"], 300000)
+            self.assertFalse(commissioning["drive"])
+            self.assertFalse(commissioning["trip_verified"])
+
+    def test_schema_two_ack_must_echo_requested_hold_kind(self):
+        self.enable_commissioning(schema=2)
+        with patch.object(device_link.subprocess, "run", self.fake):
+            self.link.command("commission_prepare", 15000)
+            self.link.command("commission_test", 1)
+        def wrong_kind(arguments, **options):
+            result = self.fake(arguments, **options)
+            if self.fake.commission_words[20] == 5:
+                self.fake.commission_words[20] = 6
+            return result
+        with patch.object(device_link.subprocess, "run", wrong_kind):
+            with self.assertRaisesRegex(RuntimeError, "echo the requested"):
+                self.link.command("commission_test", 5)
 
     def test_bad_commissioning_block_preserves_stop_but_blocks_commissioning(self):
         self.enable_commissioning()

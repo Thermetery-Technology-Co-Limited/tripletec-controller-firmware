@@ -36,6 +36,39 @@ class PresentationTests(unittest.TestCase):
         self.assertIn("plate sensor unavailable", channel_status(sample, 1, True, 11.0))
         self.assertEqual(channel_status(sample, 0, True, 14.0), "Stale reading")
 
+    def test_bench_lock_capability_requires_explicit_device_support(self):
+        for data, expected in ((status(), None), (status(valid_flags=0x3F), False),
+                               (status(valid_flags=0x7F), True),
+                               (status(bench_lock_supported=True), True),
+                               (status(bench_lock_supported=False), False),
+                               (status(schema=1, valid_flags=0x7F), False)):
+            with self.subTest(data=data):
+                self.assertIs(Snapshot.from_status(data, 10).bench_lock_supported, expected)
+        for value in (1, 0, "true", [], {}):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                Snapshot.from_status(status(bench_lock_supported=value), 10)
+
+    def test_bench_toggle_requires_fresh_supported_known_connected_state(self):
+        sample = Snapshot.from_status(status(valid_flags=0x40), 10)
+        self.assertIsNone(sample.bench_lock_block_reason(True, 11))
+        self.assertIsNotNone(sample.bench_lock_block_reason(False, 11))
+        self.assertIsNotNone(sample.bench_lock_block_reason(True, 14))
+        self.assertIsNotNone(sample.bench_lock_block_reason(True, 11, command_pending=True))
+        self.assertIsNotNone(sample.bench_lock_block_reason(True, 11, last_error="uncertain"))
+        for update in ({"valid_flags": 0}, {"schema": 1}, {"outputs_locked_off": None}):
+            with self.subTest(update=update):
+                sample = Snapshot.from_status(status(**{"valid_flags": 0x40, **update}), 10)
+                self.assertIsNotNone(sample.bench_lock_block_reason(True, 11))
+
+    def test_relock_ignores_operating_faults_sensor_availability_and_prior_error(self):
+        sample = Snapshot.from_status(status(outputs_locked_off=False, valid_flags=0x40,
+                                             active_faults=[0xFFFFFFFF] * 3, plate_c=[None] * 3,
+                                             current_a_nominal=[None] * 3,
+                                             current_limits_a=[0, 0, 0],
+                                             current_limits_commissioned_mask=0), 10)
+        self.assertIsNone(sample.bench_lock_block_reason(True, 11, last_error="uncertain"))
+        self.assertIsNotNone(sample.start_block_reason(True, 11))
+
     def test_reported_mode_and_actual_duty_are_distinct(self):
         sample = Snapshot.from_status(status(mode=1, target_c=None, desired_duty=[1, 1, 1]), 0)
         self.assertEqual(mode_label(sample.mode), "Unregulated (100%)")

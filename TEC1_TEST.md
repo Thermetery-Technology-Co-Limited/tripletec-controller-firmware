@@ -16,4 +16,6 @@ Verification before delivery: 66 targeted host/GUI tests, source and packaged GU
 
 The operator subsequently triggered the first pulse. The capture reported timer complete, LOW output pins afterward, 128 current samples returning near baseline, and a nominal uncalibrated peak of 8.58A. Telemetry resumed with probe 1 approximately 27.33°C and normal control still locked. Saved evidence: `validation/tec1-operator-pulse-2026-10-18.json` and `.log`. This result does not establish sustained current or temperature regulation.
 
+The 0.3.2 runtime bench-lock update keeps this diagnostic available only while the bench lock is ON. Its exact-image fingerprint and idle breakpoint are updated for that image; the pulse duration and register sequence are unchanged. The earlier operator capture above was made with 0.3.0 firmware and desktop 0.3.1.
+
 Reference: [ST RM0008, timer one-pulse mode](https://www.st.com/resource/en/reference_manual/rm0008-stm32f103xx-advanced-armbased-32bit-mcus-stmicroelectronics.pdf). The pin map, debug freeze bit and ADC trigger are also checked against the pinned STM32 headers and the live dry run.

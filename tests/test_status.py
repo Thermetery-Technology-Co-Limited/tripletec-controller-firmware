@@ -49,6 +49,15 @@ class StatusTest(unittest.TestCase):
         self.assertEqual(status.consistent_snapshot(frame(2, 25000, 2),
                                                    frame(2, 99000, 2))["ambient_c"], 25)
 
+    def test_bench_lock_capability_requires_schema_two_and_explicit_flag(self):
+        for schema in (1, 2):
+            for flags in (0, 63, 64, 127):
+                with self.subTest(schema=schema, flags=flags):
+                    data = bytearray(frame(schema=schema))
+                    struct.pack_into("<I", data, 20, flags)
+                    self.assertIs(status.decode(data)["bench_lock_supported"],
+                                  schema == 2 and bool(flags & 64))
+
     def test_reject_publication_in_progress(self):
         with self.assertRaises(ValueError):
             status.consistent_snapshot(frame(3), frame(3))

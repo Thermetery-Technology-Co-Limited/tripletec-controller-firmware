@@ -57,6 +57,7 @@ static control_result_t validate(const control_mailbox_t *request)
     case CONTROL_HEARTBEAT:
         return request->arg0 == 0 ? CONTROL_OK : CONTROL_BAD_VALUE;
     case CONTROL_SET_MODE:
+    case CONTROL_SET_BENCH_LOCK:
         return request->arg0 == 0 || request->arg0 == 1 ? CONTROL_OK : CONTROL_BAD_VALUE;
     case CONTROL_SET_MARGIN:
         return request->arg0 >= 500 && request->arg0 <= 20000 ? CONTROL_OK : CONTROL_BAD_VALUE;

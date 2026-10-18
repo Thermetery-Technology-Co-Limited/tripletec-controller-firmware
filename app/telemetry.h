@@ -12,8 +12,8 @@ typedef struct {
     uint32_t seq;
     uint32_t schema;
     uint32_t uptime_ms;
-    uint32_t outputs_locked;
-    uint32_t valid_flags;
+    uint32_t outputs_locked; /* Runtime bench lock only; other interlocks are independent. */
+    uint32_t valid_flags; /* bits 0..5 sensor validity; bit 6 runtime bench-lock support. */
     uint32_t sht_errors;
     uint32_t ads_errors;
     int32_t ambient_mc;

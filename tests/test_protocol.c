@@ -28,8 +28,30 @@ static control_mailbox_t packet(uint32_t sequence, uint32_t opcode, int32_t valu
     return request;
 }
 
+static void test_bench_lock_values_and_replay(void)
+{
+    control_protocol_t protocol;
+    fake_application_t app = {0};
+    const int32_t values[] = {INT32_MIN, -1, 0, 1, 2, INT32_MAX};
+    control_protocol_init(&protocol);
+    for (unsigned i = 0U; i < sizeof(values) / sizeof(values[0]); ++i) {
+        control_mailbox_t request = packet(i + 1U, CONTROL_SET_BENCH_LOCK, values[i]);
+        unsigned before = app.calls;
+        bool valid = values[i] == 0 || values[i] == 1;
+        assert(control_protocol_poll(&protocol, &request, apply, &app, 100U + i));
+        assert(protocol.result == (valid ? CONTROL_OK : CONTROL_BAD_VALUE));
+        assert(app.calls == before + (valid ? 1U : 0U));
+        if (valid) {
+            assert(app.opcode == CONTROL_SET_BENCH_LOCK && app.value == values[i]);
+        }
+        assert(!control_protocol_poll(&protocol, &request, apply, &app, 200U + i));
+        assert(app.calls == before + (valid ? 1U : 0U));
+    }
+}
+
 int main(void)
 {
+    test_bench_lock_values_and_replay();
     control_protocol_t protocol;
     fake_application_t app = {0};
     control_mailbox_t request = packet(1U, CONTROL_SET_MODE, 1);

@@ -72,6 +72,10 @@ class FakeSerial:
                 self.words[32] = value
             elif opcode == 3:
                 self.words[33] = value
+            elif opcode == 6:
+                self.words[4] = value
+                self.words[34] = 0
+                self.words[24:27] = [0, 0, 0]
         self.pending = self.transform(self.frame(sequence, result), sequence)
         return len(packet) - 1 if self.short_write else len(packet)
 
@@ -149,6 +153,50 @@ class UsbLinkTest(unittest.TestCase):
         self.assertEqual(len(self.fake.writes), 1)
         self.assertFalse(self.fake.closed)
         self.link.command("stop")
+
+    def test_bench_lock_preflight_and_both_transitions_stop_without_arming(self):
+        self.fake.words[5] |= 0x40
+        limits = self.fake.limits.copy()
+        for value in (0, 1):
+            with self.subTest(value=value):
+                self.fake.words[34] = 7
+                self.fake.words[24:27] = [100, 200, 300]
+                status = self.link.command("bench_lock", value)
+                self.assertIs(status["outputs_locked_off"], bool(value))
+                self.assertTrue(status["bench_lock_supported"])
+                self.assertEqual(status["armed_mask"], 0)
+                self.assertEqual(status["applied_duty"], [0, 0, 0])
+        self.assertEqual([packet[5] for packet in self.fake.writes], [0, 6, 0, 6])
+        self.assertEqual(self.fake.limits, limits)
+
+    def test_bench_lock_without_capability_only_reads_status(self):
+        with self.assertRaisesRegex(RuntimeError, "does not support changing"):
+            self.link.command("bench_lock", 0)
+        self.assertEqual([packet[5] for packet in self.fake.writes], [0])
+
+    def test_bench_lock_ack_must_echo_lock_and_stopped_state_without_replaying(self):
+        before = {"schema": 2, "valid_flags": 0x40}
+        for value in (0, 1):
+            for wrong in ({"outputs_locked_off": not bool(value)}, {"armed_mask": 1},
+                          {"applied_duty": [0, 0, 0.001]}, {"valid_flags": 0}):
+                ack = {"schema": 2, "valid_flags": 0x40, "outputs_locked_off": bool(value),
+                       "armed_mask": 0, "applied_duty": [0, 0, 0], **wrong}
+                with self.subTest(value=value, wrong=wrong), patch.object(self.link, "_exchange",
+                        side_effect=[(0, before), (0, ack)]) as exchange:
+                    with self.assertRaises(RuntimeError):
+                        self.link.command("bench_lock", value)
+                    self.assertEqual(exchange.call_count, 2)
+                    self.assertEqual(exchange.call_args.args, (6, value))
+
+    def test_bench_lock_uncertain_command_write_is_never_replayed(self):
+        self.fake.words[5] |= 0x40
+        def corrupt_command(frame, sequence):
+            return (frame[:-1] + bytes([frame[-1] ^ 1])) if self.fake.writes[-1][5] == 6 else frame
+        self.fake.transform = corrupt_command
+        with self.assertRaisesRegex(RuntimeError, "checksum failed"):
+            self.link.command("bench_lock", 0)
+        self.assertEqual([packet[5] for packet in self.fake.writes], [0, 6])
+        self.assertTrue(self.fake.closed)
 
     def test_polling_only_sends_heartbeat_when_armed(self):
         self.link.read_status()
@@ -250,7 +298,9 @@ class UsbLinkTest(unittest.TestCase):
 
     def test_invalid_commands_never_write(self):
         for name, value in (("status", 0), ("arm", 0), ("arm", 8), ("mode", 2),
-                            ("margin", 499), ("stop", 1), ("heartbeat", 1), ("mode", True)):
+                            ("margin", 499), ("stop", 1), ("heartbeat", 1), ("mode", True),
+                            ("bench_lock", -1), ("bench_lock", 2), ("bench_lock", True),
+                            ("bench_lock", False), ("bench_lock", 0.0), ("bench_lock", "0")):
             with self.subTest(name=name, value=value):
                 with self.assertRaises(RuntimeError):
                     self.link.command(name, value)

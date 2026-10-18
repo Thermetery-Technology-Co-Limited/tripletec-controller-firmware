@@ -12,6 +12,7 @@
 #include <limits.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdatomic.h>
 #include <string.h>
 
 #if !defined(BENCH_OUTPUT_LOCK) || BENCH_OUTPUT_LOCK != 1 || BOARD_TEC_OUTPUTS_LOCKED_OFF != 1
@@ -25,6 +26,11 @@ volatile control_mailbox_t g_command_mailbox = {
     .magic = CONTROL_MAILBOX_MAGIC, .version = CONTROL_PROTOCOL_VERSION
 };
 static control_protocol_t command_protocol;
+/* Volatile session policy: reset always relocks; unlocking never arms a TEC.
+ * Hardware commissioning, calibrated currents and current-limit gates are
+ * independent and cannot be granted by the bench-lock command.
+ */
+static bool bench_outputs_locked = true;
 static tec_controller_t controller;
 static tec_inputs_t inputs;
 static tec_outputs_t outputs;
@@ -98,7 +104,8 @@ static void publish(uint32_t now)
     next.seq = sequence + 1U;
     next.schema = 2U;
     next.uptime_ms = now;
-    next.outputs_locked = 1U;
+    next.outputs_locked = bench_outputs_locked ? 1U : 0U;
+    next.valid_flags = 1U << 6; /* Runtime bench-lock command is supported. */
     next.sht_errors = sht_errors;
     next.ads_errors = ads_errors;
     limits.magic = UINT32_C(0x5445434c);
@@ -155,11 +162,11 @@ static void publish(uint32_t now)
     g_telemetry.seq = sequence + 1U;
     g_adc_diagnostics.seq = sequence + 1U;
     g_limit_configuration.seq = sequence + 1U;
-    __asm volatile("dmb" ::: "memory");
+    atomic_thread_fence(memory_order_seq_cst);
     g_telemetry = next;
     g_adc_diagnostics = diagnostic;
     g_limit_configuration = limits;
-    __asm volatile("dmb" ::: "memory");
+    atomic_thread_fence(memory_order_seq_cst);
     g_telemetry.seq = sequence + 2U;
     g_adc_diagnostics.seq = sequence + 2U;
     g_limit_configuration.seq = sequence + 2U;
@@ -184,6 +191,16 @@ static control_result_t apply_command(void *context, uint32_t opcode,
         return CONTROL_OK;
     case CONTROL_HEARTBEAT:
         return CONTROL_OK;
+    case CONTROL_SET_BENCH_LOCK:
+        if (value != 0 && value != 1) {
+            return CONTROL_BAD_VALUE;
+        }
+        /* Physical off first, then publish the requested software lock state.
+         * This command never changes commissioning or starts PWM.
+         */
+        disarm_all();
+        bench_outputs_locked = value != 0;
+        return CONTROL_OK;
     case CONTROL_SET_MODE:
         disarm_all();
         return tec_controller_set_mode(&controller, (tec_mode_t)value) ?
@@ -200,11 +217,14 @@ static control_result_t apply_command(void *context, uint32_t opcode,
         return CONTROL_OK;
     }
     case CONTROL_ARM:
-        /* This image has no output-enable path. Future commissioned builds
-         * additionally need current, wiring, fresh-sensor and host-link gates.
-         */
         disarm_all();
-        return CONTROL_BENCH_LOCKED;
+        if (bench_outputs_locked) {
+            return CONTROL_BENCH_LOCKED;
+        }
+        /* Board commissioning and the current-protection gates remain
+         * unverified on this assembly. Unlocking is not commissioning.
+         */
+        return CONTROL_INTERLOCK;
     default:
         return CONTROL_BAD_OPCODE;
     }
@@ -269,6 +289,7 @@ static void usb_service(void)
     if (generation != usb_session_generation || (usb_was_connected && !connected)) {
         usb_session_generation = generation;
         disarm_all();
+        bench_outputs_locked = true;
         usb_input_used = 0U;
         usb_input_offset = 0U;
         usb_protocol_init(&usb_protocol, usb_apply, usb_snapshot, usb_enqueue, NULL);
@@ -293,9 +314,10 @@ static void print_status(void)
 {
     char text[256];
     (void)snprintf(text, sizeof(text),
-        "TEC-BENCH v2 up=%lu lock=1 ambient_mC=%ld RH_mPct=%ld dew_mC=%ld target_mC=%ld "
+        "TEC-BENCH v2 up=%lu lock=%lu ambient_mC=%ld RH_mPct=%ld dew_mC=%ld target_mC=%ld "
         "plate_mC=%ld,%ld,%ld valid=0x%lx sht_err=%lu ads_err=%lu PWM=0,0,0\r\n",
-        (unsigned long)g_telemetry.uptime_ms, (long)g_telemetry.ambient_mc,
+        (unsigned long)g_telemetry.uptime_ms, (unsigned long)g_telemetry.outputs_locked,
+        (long)g_telemetry.ambient_mc,
         (long)g_telemetry.rh_mpercent, (long)g_telemetry.dewpoint_mc,
         (long)g_telemetry.target_mc, (long)g_telemetry.plate_mc[0],
         (long)g_telemetry.plate_mc[1], (long)g_telemetry.plate_mc[2],
@@ -338,7 +360,7 @@ int main(void)
     tec_config_defaults(&config);
     (void)tec_controller_init(&controller, &config);
     control_protocol_init(&command_protocol);
-    inputs.hardware_verified = false; /* No runtime command can remove bench lock. */
+    inputs.hardware_verified = false; /* Bench unlock cannot commission hardware. */
     (void)sht31_init(&sht, &sht_bus, 0x44U);
     (void)ads1220_init(&ads, &ads_bus);
     ntc_config_defaults(&ntc_config);
@@ -356,7 +378,7 @@ int main(void)
     usb_protocol_init(&usb_protocol, usb_apply, usb_snapshot, usb_enqueue, NULL);
     usb_enabled = usb_device_init();
     usb_session_generation = usb_device_session_generation();
-    board_uart_write("TripleTECDriver bench firmware: dew point +3C; outputs permanently OFF.\r\n");
+    board_uart_write("TripleTECDriver bench firmware: dew point +3C; bench lock ON; hardware/current gates retained.\r\n");
 
     for (;;) {
         uint32_t now = board_millis();

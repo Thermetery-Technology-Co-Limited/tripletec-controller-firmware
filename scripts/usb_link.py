@@ -8,6 +8,7 @@ import time
 import zlib
 
 from .read_status import decode, consistent_adc_diagnostics, consistent_limit_configuration
+from .device_link import require_bench_lock_support, validate_bench_lock_ack
 
 USB_VID = 0xCAFE
 USB_PID = 0x4001
@@ -20,7 +21,8 @@ RESPONSE = struct.Struct("<4sBBHI")
 READ_TIMEOUT = 3.0
 WRITE_TIMEOUT = 1.0
 SESSION_SETTLE_SECONDS = 0.05
-OPCODES = {"status": 0, "stop": 1, "mode": 2, "margin": 3, "arm": 4, "heartbeat": 5}
+OPCODES = {"status": 0, "stop": 1, "mode": 2, "margin": 3, "arm": 4, "heartbeat": 5,
+           "bench_lock": 6}
 RESULT_NAMES = {0: "OK", 1: "BAD_PROTOCOL", 2: "BAD_CHECKSUM", 3: "BAD_OPCODE",
                 4: "BAD_VALUE", 5: "BENCH_LOCKED", 6: "INTERLOCK"}
 
@@ -198,10 +200,16 @@ class UsbLink:
             raise RuntimeError("Unsupported controller command")
         if ((name in ("stop", "heartbeat") and value != 0) or
                 (name == "mode" and value not in (0, 1)) or
+                (name == "bench_lock" and value not in (0, 1)) or
                 (name == "margin" and not 500 <= value <= 20000) or
                 (name == "arm" and not 1 <= value <= 7)):
             raise RuntimeError("Command value is outside its allowed range")
         with self.lock:
+            if name == "bench_lock":
+                result, before = self._exchange(OPCODES["status"])
+                if result != 0:
+                    raise RuntimeError(f"Controller rejected status: {RESULT_NAMES.get(result, 'UNKNOWN')}")
+                require_bench_lock_support(before)
             result, status = self._exchange(OPCODES[name], value)
             if result != 0:
                 raise RuntimeError(f"Controller rejected {name}: {RESULT_NAMES.get(result, 'UNKNOWN')}")
@@ -212,4 +220,6 @@ class UsbLink:
                 raise RuntimeError("Controller ACK did not echo the requested margin")
             if name == "stop" and (status["armed_mask"] or any(status["applied_duty"])):
                 raise RuntimeError("Controller ACK did not confirm stopped outputs")
+            if name == "bench_lock":
+                validate_bench_lock_ack(status, value)
             return status

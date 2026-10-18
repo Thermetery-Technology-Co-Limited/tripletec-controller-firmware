@@ -175,6 +175,10 @@ static void test_validation_never_applies(void)
         {CONTROL_SET_MARGIN, INT32_MIN, CONTROL_BAD_VALUE},
         {CONTROL_ARM, 0, CONTROL_BAD_VALUE},
         {CONTROL_ARM, 8, CONTROL_BAD_VALUE},
+        {CONTROL_SET_BENCH_LOCK, INT32_MIN, CONTROL_BAD_VALUE},
+        {CONTROL_SET_BENCH_LOCK, -1, CONTROL_BAD_VALUE},
+        {CONTROL_SET_BENCH_LOCK, 2, CONTROL_BAD_VALUE},
+        {CONTROL_SET_BENCH_LOCK, INT32_MAX, CONTROL_BAD_VALUE},
         {255U, 0, CONTROL_BAD_OPCODE}
     };
     usb_protocol_t protocol;
@@ -209,7 +213,8 @@ static void test_valid_value_boundaries(void)
     static const struct { uint8_t opcode; int32_t value; } cases[] = {
         {CONTROL_SET_MODE, 0}, {CONTROL_SET_MODE, 1},
         {CONTROL_SET_MARGIN, 500}, {CONTROL_SET_MARGIN, 20000},
-        {CONTROL_ARM, 1}, {CONTROL_ARM, 7}, {CONTROL_STOP, 0}, {CONTROL_HEARTBEAT, 0}
+        {CONTROL_ARM, 1}, {CONTROL_ARM, 7}, {CONTROL_STOP, 0}, {CONTROL_HEARTBEAT, 0},
+        {CONTROL_SET_BENCH_LOCK, 0}, {CONTROL_SET_BENCH_LOCK, 1}
     };
     usb_protocol_t protocol;
     fixture_t fixture;
@@ -220,8 +225,9 @@ static void test_valid_value_boundaries(void)
         assert(usb_protocol_feed(&protocol, bytes, sizeof(bytes)) == sizeof(bytes));
         check_response(&fixture, i, i + 1U, CONTROL_OK);
         assert(fixture.last_value == cases[i].value);
+        assert(fixture.last_opcode == cases[i].opcode);
     }
-    assert(fixture.apply_count == 8U);
+    assert(fixture.apply_count == sizeof(cases) / sizeof(cases[0]));
 }
 
 static void test_noise_corruption_and_resynchronization(void)

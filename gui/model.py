@@ -69,6 +69,7 @@ class Snapshot:
     valid_flags: int | None
     current_limits_a: tuple
     current_limits_commissioned_mask: int | None
+    bench_lock_supported: bool | None
 
     @classmethod
     def from_status(cls, data: dict, received_at: float) -> "Snapshot":
@@ -103,6 +104,14 @@ class Snapshot:
         commissioned = _integer(data.get("current_limits_commissioned_mask"), 0, 7)
         if data.get("current_limits_commissioned_mask") is not None and commissioned is None:
             raise ValueError("Unsupported current commissioning state; controls remain disabled")
+        capability = data.get("bench_lock_supported")
+        if capability is not None and not isinstance(capability, bool):
+            raise ValueError("Unsupported bench-lock capability; controls remain disabled")
+        valid_flags = _integer(data.get("valid_flags"))
+        if schema < 2:
+            capability = False
+        elif valid_flags is not None:
+            capability = bool(valid_flags & 0x40) or capability is True
         return cls(
             received_at, schema, _number(data.get("ambient_c")),
             _number(data.get("rh_percent")), _number(data.get("dewpoint_c")),
@@ -112,12 +121,30 @@ class Snapshot:
             _number(data.get("margin_c")) if schema == 2 else None,
             _integer(data.get("armed_mask"), 0, 7) if schema == 2 else None,
             _integer(data.get("uptime_ms")), _integer(data.get("sht31_errors")),
-            _integer(data.get("ads1220_errors")), _integer(data.get("valid_flags")),
-            limits, commissioned,
+            _integer(data.get("ads1220_errors")), valid_flags,
+            limits, commissioned, capability,
         )
 
     def stale(self, now: float) -> bool:
         return now - self.received_at > STALE_SECONDS
+
+    def bench_lock_block_reason(self, connected: bool, now: float, *,
+                                command_pending: bool = False,
+                                last_error: str | None = None) -> str | None:
+        """Relocking needs fresh state, independent of operating interlocks."""
+        if not connected:
+            return "Connect to a device to change the bench lock."
+        if self.stale(now):
+            return "Fresh controller readings are required to change the bench lock."
+        if self.schema < 2 or self.bench_lock_supported is not True:
+            return "This firmware does not report support for changing the bench lock."
+        if self.outputs_locked_off is None:
+            return "The controller's bench-lock state is unavailable."
+        if command_pending:
+            return "Wait for firmware acknowledgement before changing the bench lock."
+        if last_error and self.outputs_locked_off:
+            return "Restore communication before unlocking the bench lock."
+        return None
 
     def start_block_reason(self, connected: bool, now: float) -> str | None:
         if not connected:

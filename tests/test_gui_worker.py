@@ -106,6 +106,28 @@ class WorkerTest(unittest.TestCase):
         self.assertEqual(self.event()[1], "status")
         self.assertEqual(self.link.commands, [("stop", 0)])
 
+    def test_bench_lock_ack_uses_selected_transport_without_arm(self):
+        self.connect("swd")
+        for value in (0, 1):
+            reported = bench_status(outputs_locked_off=bool(value), valid_flags=0x67)
+            with patch.object(self.link, "command", return_value=reported) as command:
+                self.worker.submit(0, "command", [("bench_lock", value)])
+                generation, kind, (origin, result) = self.event()
+                self.assertEqual((generation, kind, origin), (0, "status", "command"))
+                command.assert_called_once_with("bench_lock", value)
+                self.assertIs(result["outputs_locked_off"], bool(value))
+                self.assertEqual(result["transport"], "swd")
+        self.assertEqual(self.open_link.call_count, 1)
+        self.assertEqual(self.link.pulse_calls, 0)
+
+    def test_bench_lock_error_is_not_retried_or_fallen_back(self):
+        self.connect("usb")
+        with patch.object(self.link, "command", side_effect=RuntimeError("lock rejected")) as command:
+            self.worker.submit(0, "command", [("bench_lock", 0)])
+            self.assertEqual(self.event(), (0, "error", ("command", "lock rejected")))
+            command.assert_called_once_with("bench_lock", 0)
+        self.assertEqual(self.open_link.call_count, 1)
+
     def test_tec1_operator_action_calls_swd_pulse_once_without_arm(self):
         self.connect("swd")
         self.worker.submit(0, "tec1_test")
@@ -147,6 +169,76 @@ class WorkerTest(unittest.TestCase):
         self.assertEqual(self.event()[1], "status")
         self.assertEqual(self.link.pulse_calls, 0)
         self.assertEqual(self.link.commands, [("stop", 0)])
+
+
+class BenchLockControlsTest(unittest.TestCase):
+    def dashboard(self, **status_changes):
+        dashboard = app.Dashboard.__new__(app.Dashboard)
+        dashboard.snapshot = app.Snapshot.from_status(bench_status(valid_flags=0x67, **status_changes), 100)
+        dashboard.connected = True
+        dashboard.command_pending = False
+        dashboard.last_error = None
+        dashboard.generation = 4
+        dashboard.worker = Mock()
+        dashboard.message = Mock()
+        dashboard._is_demo = Mock(return_value=False)
+        dashboard._render_controls = Mock()
+        return dashboard
+
+    def test_unlock_click_queues_once_and_does_not_optimistically_change_state(self):
+        dashboard = self.dashboard()
+        with patch.object(app.time, "monotonic", return_value=101):
+            dashboard.toggle_bench_lock()
+            dashboard.toggle_bench_lock()
+        dashboard.worker.submit.assert_called_once_with(4, "command", [("bench_lock", 0)], 2)
+        self.assertTrue(dashboard.command_pending)
+        self.assertTrue(dashboard.snapshot.outputs_locked_off)
+
+    def test_relock_click_still_works_with_faults_error_and_dirty_settings(self):
+        dashboard = self.dashboard(outputs_locked_off=False, plate_c=[None] * 3,
+                                   active_faults=[0xFFFFFFFF] * 3)
+        dashboard.last_error = "previous setting rejected"
+        dashboard.dirty = True
+        with patch.object(app.time, "monotonic", return_value=101):
+            dashboard.toggle_bench_lock()
+        dashboard.worker.submit.assert_called_once_with(4, "command", [("bench_lock", 1)], 0)
+        self.assertFalse(dashboard.snapshot.outputs_locked_off)
+
+    def test_toggle_never_submits_for_unsupported_stale_disconnected_or_demo(self):
+        for state in ("unsupported", "stale", "disconnected", "demo", "unknown"):
+            with self.subTest(state=state):
+                dashboard = self.dashboard()
+                if state == "unsupported":
+                    dashboard.snapshot = app.Snapshot.from_status(bench_status(), 100)
+                elif state == "disconnected":
+                    dashboard.connected = False
+                elif state == "demo":
+                    dashboard._is_demo.return_value = True
+                elif state == "unknown":
+                    dashboard.snapshot = app.Snapshot.from_status(bench_status(valid_flags=0x67, outputs_locked_off=None), 100)
+                with patch.object(app.time, "monotonic", return_value=104 if state == "stale" else 101):
+                    dashboard.toggle_bench_lock()
+                dashboard.worker.submit.assert_not_called()
+
+    def test_only_acknowledged_status_changes_displayed_lock_state(self):
+        dashboard = self.dashboard()
+        dashboard.closed = False
+        dashboard.poll_pending = False
+        dashboard.connecting = False
+        dashboard.root = Mock()
+        dashboard.worker.events = app.queue.Queue()
+        dashboard.dirty = False
+        dashboard._render = Mock()
+        dashboard._accept_status = lambda result: setattr(
+            dashboard, "snapshot", app.Snapshot.from_status(result, 101))
+        with patch.object(app.time, "monotonic", return_value=101):
+            dashboard.toggle_bench_lock()
+        self.assertTrue(dashboard.snapshot.outputs_locked_off)
+        dashboard.worker.events.put((4, "status", ("command", bench_status(
+            outputs_locked_off=False, valid_flags=0x67))))
+        dashboard._drain()
+        self.assertFalse(dashboard.snapshot.outputs_locked_off)
+        self.assertFalse(dashboard.command_pending)
 
 
 class Tec1PulseControlsTest(unittest.TestCase):

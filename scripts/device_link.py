@@ -26,7 +26,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MAILBOX_MAGIC = 0x54454343
 PROTOCOL_VERSION = 1
 MAILBOX_SIZE = 32
-OPCODES = {"stop": 1, "mode": 2, "margin": 3, "arm": 4, "heartbeat": 5}
+OPCODES = {"stop": 1, "mode": 2, "margin": 3, "arm": 4, "heartbeat": 5, "bench_lock": 6}
 PROBE_MUTEX = threading.RLock()
 SUBPROCESS_TIMEOUT = 5.0
 ACK_TIMEOUT = 3.0
@@ -40,6 +40,20 @@ def command_packet(sequence: int, opcode: int, value: int) -> bytes:
     checksum = zlib.crc32(struct.pack("<7I", *words)) & 0xFFFFFFFF
     words[2] = 0
     return struct.pack("<8I", *words, checksum)
+
+
+def require_bench_lock_support(status: dict) -> None:
+    if status.get("schema") != 2 or not (status.get("valid_flags", 0) & 0x40):
+        raise RuntimeError("Connected firmware does not support changing the bench lock; load the matching image")
+
+
+def validate_bench_lock_ack(status: dict, value: int) -> None:
+    require_bench_lock_support(status)
+    if status.get("outputs_locked_off") is not bool(value):
+        raise RuntimeError("Controller ACK did not echo the requested bench lock")
+    # Unlock only permits a later, separate Arm request. Both transitions stop.
+    if status.get("armed_mask") != 0 or status.get("applied_duty") != [0, 0, 0]:
+        raise RuntimeError("Controller ACK did not confirm stopped outputs after the bench lock change")
 
 
 def _ram_region(address: object, length: int) -> int:
@@ -194,6 +208,7 @@ class DeviceLink:
             raise RuntimeError("Unsupported controller command")
         if ((name in ("stop", "heartbeat") and value != 0) or
                 (name == "mode" and value not in (0, 1)) or
+                (name == "bench_lock" and value not in (0, 1)) or
                 (name == "margin" and not 500 <= value <= 20000) or
                 (name == "arm" and not 1 <= value <= 7)):
             raise RuntimeError("Command value is outside its allowed range")
@@ -204,6 +219,8 @@ class DeviceLink:
             status, mailbox = self._read(metadata, mailbox=True)
             if status["schema"] != 2:
                 raise RuntimeError("Connected firmware has read-only schema 1; load the matching image")
+            if name == "bench_lock":
+                require_bench_lock_support(status)
             if mailbox is None or len(mailbox) != MAILBOX_SIZE:
                 raise RuntimeError("Command mailbox snapshot is incomplete")
             magic, version = struct.unpack_from("<2I", mailbox)
@@ -232,6 +249,8 @@ class DeviceLink:
                         raise RuntimeError("Controller ACK did not echo the requested margin")
                     if name == "stop" and acknowledged["armed_mask"] != 0:
                         raise RuntimeError("Controller ACK did not confirm stopped channels")
+                    if name == "bench_lock":
+                        validate_bench_lock_ack(acknowledged, value)
                     return acknowledged
                 time.sleep(0.05)
             raise RuntimeError("Controller did not acknowledge the command; reconnect and check status")

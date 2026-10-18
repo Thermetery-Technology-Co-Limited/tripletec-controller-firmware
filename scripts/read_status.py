@@ -28,6 +28,7 @@ def decode(data: bytes) -> dict:
     result = {
         "schema": words[2], "sequence": words[1], "uptime_ms": words[3],
         "outputs_locked_off": bool(words[4]), "valid_flags": words[5],
+        "bench_lock_supported": words[2] == 2 and bool(words[5] & 0x40),
         "sht31_errors": words[6], "ads1220_errors": words[7],
         "ambient_c": value(8), "rh_percent": value(9),
         "dewpoint_c": value(10), "target_c": value(11),

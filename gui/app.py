@@ -208,6 +208,7 @@ class Dashboard:
         self.message = tk.StringVar(value="Ready. Auto tries STM32 USB-C first, then Pico SWD when no USB device is present.")
         self.reason = tk.StringVar(value="Connect to a device before starting.")
         self.note = tk.StringVar()
+        self.bench_lock_state = tk.StringVar(value="BENCH LOCK  —")
         self.tec1_test_result = tk.StringVar(value="TEC1 pulse test has not been run.")
         self.metric_values = []
         self.channel_values = []
@@ -355,8 +356,16 @@ class Dashboard:
         controls.grid(row=0, column=0, sticky="nsew", padx=(0, 7))
         controls.columnconfigure(0, weight=1)
         self._label(controls, variable=self.reported_mode, size=9, color="accent", bold=True).grid(row=0, column=0, sticky="w", padx=14, pady=(11, 6))
+        bench_lock = tk.Frame(controls, bg=COLORS["panel"])
+        bench_lock.grid(row=1, column=0, sticky="ew", padx=14, pady=(0, 6))
+        self._label(bench_lock, variable=self.bench_lock_state, size=9, color="amber", bold=True).pack(side="left", padx=(0, 12))
+        self.bench_lock_button = self._button(bench_lock, "Unlock bench lock", self.toggle_bench_lock)
+        self.bench_lock_button.pack(side="right")
+        self.bench_lock_note = self._label(controls, "Unlocking does not start outputs. Sensor, hardware and current interlocks still apply.",
+                                           size=9, color="muted", wraplength=510)
+        self.bench_lock_note.grid(row=2, column=0, sticky="w", padx=14, pady=(0, 6))
         options = tk.Frame(controls, bg=COLORS["panel"])
-        options.grid(row=1, column=0, sticky="ew", padx=10)
+        options.grid(row=3, column=0, sticky="ew", padx=10)
         self.mode_buttons = []
         for label, value in (("Regulated", 0), ("Unregulated (100%)", 1)):
             radio = tk.Radiobutton(options, text=label, variable=self.mode, value=value,
@@ -367,7 +376,7 @@ class Dashboard:
             radio.pack(side="left", padx=(0, 8))
             self.mode_buttons.append(radio)
         settings = tk.Frame(controls, bg=COLORS["panel"])
-        settings.grid(row=2, column=0, sticky="ew", padx=14, pady=(7, 6))
+        settings.grid(row=4, column=0, sticky="ew", padx=14, pady=(7, 6))
         self._label(settings, "Dew-point margin", size=9, color="muted").pack(side="left")
         self.margin_entry = tk.Entry(settings, textvariable=self.margin, width=6,
                                      bg=COLORS["raised"], fg=COLORS["text"], insertbackground=COLORS["text"],
@@ -379,15 +388,15 @@ class Dashboard:
         self.apply_button = self._button(settings, "Apply settings", self.apply)
         self.apply_button.pack(side="right")
         actions = tk.Frame(controls, bg=COLORS["panel"])
-        actions.grid(row=3, column=0, sticky="ew", padx=14)
+        actions.grid(row=5, column=0, sticky="ew", padx=14)
         self.start_button = self._button(actions, "Start all channels", self.start, accent=True)
         self.start_button.pack(side="left", fill="x", expand=True, padx=(0, 8))
         self.stop_button = self._button(actions, "STOP ALL", self.stop, danger=True)
         self.stop_button.pack(side="left", fill="x", expand=True)
         self.reason_label = self._label(controls, variable=self.reason, size=9, color="amber", wraplength=510)
-        self.reason_label.grid(row=4, column=0, sticky="w", padx=14, pady=(7, 5))
+        self.reason_label.grid(row=6, column=0, sticky="w", padx=14, pady=(7, 5))
         self.note_label = self._label(controls, variable=self.note, size=9, color="muted", wraplength=510)
-        self.note_label.grid(row=5, column=0, sticky="w", padx=14, pady=(0, 11))
+        self.note_label.grid(row=7, column=0, sticky="w", padx=14, pady=(0, 11))
         trend_panel = self._panel(bottom)
         trend_panel.grid(row=0, column=1, sticky="nsew", padx=(7, 0))
         self._label(trend_panel, "LOCAL TREND", size=10, bold=True).pack(anchor="w", padx=14, pady=(11, 0))
@@ -403,6 +412,7 @@ class Dashboard:
         width = max(300, int((event.width - 14) * 0.6) - 30)
         self.reason_label.configure(wraplength=width)
         self.note_label.configure(wraplength=width)
+        self.bench_lock_note.configure(wraplength=width)
         self.footer.configure(wraplength=max(500, event.width - 10))
         self.tec1_test_result_label.configure(wraplength=max(500, event.width - 40))
 
@@ -524,7 +534,8 @@ class Dashboard:
         if not self.connected:
             return
         self.command_pending = True
-        priority = 0 if any(name == "stop" for name, _ in commands) else 2
+        priority = 0 if any(name == "stop" or (name == "bench_lock" and value == 1)
+                            for name, value in commands) else 2
         self.worker.submit(self.generation, "command", commands, priority)
         self.message.set("Waiting for firmware acknowledgement…")
         self._render_controls()
@@ -567,6 +578,20 @@ class Dashboard:
             self.poll_pending = False
             self.command_pending = False
         self._command([("stop", 0)])
+
+    def toggle_bench_lock(self):
+        # The reported device state remains unchanged until an acknowledged
+        # response arrives. Reconnect and polling never submit this command.
+        if self._is_demo() or self.snapshot is None:
+            return
+        reason = self.snapshot.bench_lock_block_reason(
+            self.connected, time.monotonic(), command_pending=self.command_pending,
+            last_error=self.last_error)
+        if reason:
+            self.message.set(reason)
+            return
+        value = 0 if self.snapshot.outputs_locked_off else 1
+        self._command([("bench_lock", value)])
 
     def test_tec1(self):
         reason = tec1_test_block_reason(
@@ -740,6 +765,23 @@ class Dashboard:
         self.reason.set(reason or ("Demo controls affect simulated values only." if demo else "Ready. Start requests all three channels; firmware checks every interlock."))
         self.start_button.configure(state="normal" if available and not reason else "disabled")
         self.stop_button.configure(state="normal" if (self.connected or demo) and sample and sample.schema >= 2 else "disabled")
+        lock_reason = (sample.bench_lock_block_reason(
+            self.connected, now, command_pending=self.command_pending,
+            last_error=self.last_error) if sample else "No controller status")
+        lock_known = sample is not None and sample.outputs_locked_off is not None
+        lock_text = "ON · outputs locked OFF" if lock_known and sample.outputs_locked_off else "OFF · firmware interlocks apply"
+        if not lock_known:
+            lock_text = "state unavailable"
+        elif not self.connected or sample.stale(now):
+            lock_text += " · last reading"
+        if demo:
+            lock_text = "not available in demo"
+        elif sample and sample.bench_lock_supported is not True:
+            lock_text += " · toggle unsupported"
+        self.bench_lock_state.set("BENCH LOCK  " + lock_text)
+        self.bench_lock_button.configure(
+            text="Lock outputs OFF" if lock_known and not sample.outputs_locked_off else "Unlock bench lock",
+            state="normal" if not demo and lock_reason is None else "disabled")
         pulse_reason = tec1_test_block_reason(
             sample, connected=self.connected, transport=self.active_transport, now=now,
             command_pending=self.command_pending, last_error=self.last_error, demo=demo)

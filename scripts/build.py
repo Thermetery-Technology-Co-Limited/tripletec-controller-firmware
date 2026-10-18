@@ -38,12 +38,15 @@ def host(cc: str) -> None:
         "protocol": ["app/control_protocol.c"],
         "usb_protocol": ["app/usb_protocol.c"],
         "usb_descriptors": ["platform/stm32f103/usb_descriptors.c"],
+        "bench_lock": ["core/dewpoint.c", "core/controller.c"],
         "sensors": sorted(str(p.relative_to(ROOT)) for p in (ROOT / "sensors").glob("*.c")),
     }
     for name, sources in groups.items():
         binary = output / (f"test_{name}.exe" if os.name == "nt" else f"test_{name}")
         extra = (["-Iplatform/stm32f103", "-Ithird_party/tinyusb/src", "-DSTM32F103xE"]
-                 if name == "usb_descriptors" else [])
+                 if name in ("usb_descriptors", "bench_lock") else [])
+        if name == "bench_lock":
+            extra += ["-DBENCH_OUTPUT_LOCK=1", "-ffunction-sections", "-fdata-sections", "-Wl,--gc-sections"]
         run([cc, "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror", "-pedantic",
              "-Icore", "-Isensors", "-Iapp", *extra, *sources, f"tests/test_{name}.c", "-lm", "-o", binary])
         run([binary])

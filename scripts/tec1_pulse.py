@@ -19,9 +19,9 @@ import time
 
 from .device_link import PROBE_MUTEX, _tcl_path
 
-IMAGE_SHA256 = "2cc182502a66b3334bc0be4dd66477d84819aa22f980bd1720914721e01058b5"
-IMAGE_BYTES = 27704
-IDLE_ADDRESS = 0x080024A8  # board_watchdog_feed in the exact image above.
+IMAGE_SHA256 = "23702a03ff4ed2bb82ad66e9e5dd98205bd18d6609957049cf60f8600b80a626"
+IMAGE_BYTES = 27796
+IDLE_ADDRESS = 0x080024E8  # board_watchdog_feed in the exact image above.
 BUFFER_ADDRESS = 0x2000B000  # >40KiB above static data, >2KiB below required MSP.
 CAPTURE_BYTES = 256
 PULSE_US = 1000
@@ -223,7 +223,7 @@ def run_tec1_pulse(link, *, fire: bool = True) -> dict:
         directory = Path(temporary)
         metadata = link._metadata()
         if metadata.get("firmware_sha256") != IMAGE_SHA256:
-            raise RuntimeError("TEC1 test requires the exact validated 0.3.0 bench image")
+            raise RuntimeError("TEC1 test requires the exact validated 0.3.2 bench image")
         before = link._read(metadata)[0]
         validate_preflight(before)
         time.sleep(0.3)

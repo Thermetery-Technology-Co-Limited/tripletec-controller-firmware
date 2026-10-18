@@ -63,6 +63,10 @@ class FakeOpenOCD:
                             self.words[33] = mailbox[4]
                         elif mailbox[3] == 1:
                             self.words[34] = 0
+                        elif mailbox[3] == 6:
+                            self.words[4] = mailbox[4]
+                            self.words[34] = 0
+                            self.words[24:27] = [0, 0, 0]
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
 
@@ -201,6 +205,59 @@ class DeviceLinkTest(unittest.TestCase):
             self.fake.reject = 5
             with self.assertRaisesRegex(RuntimeError, "BENCH_LOCKED"):
                 self.link.command("arm", 7)
+
+    def test_bench_lock_both_transitions_stop_without_arming_or_changing_policy(self):
+        self.fake.words[5] |= 0x40
+        original_limits = self.fake.limit_words.copy()
+        for value in (0, 1):
+            with self.subTest(value=value):
+                self.fake.words[34] = 7
+                self.fake.words[24:27] = [100, 200, 300]
+                with patch.object(device_link.subprocess, "run", self.fake):
+                    result = self.link.command("bench_lock", value)
+                self.assertIs(result["outputs_locked_off"], bool(value))
+                self.assertTrue(result["bench_lock_supported"])
+                self.assertEqual(result["armed_mask"], 0)
+                self.assertEqual(result["applied_duty"], [0, 0, 0])
+                self.assertEqual(struct.unpack("<8I", self.fake.mailbox)[3:5], (6, value))
+        self.assertEqual(self.fake.limit_words, original_limits)
+        self.assertEqual(sum(command.startswith("load_image") for command in self.fake.commands), 2)
+
+    def test_bench_lock_without_capability_writes_nothing(self):
+        with patch.object(device_link.subprocess, "run", self.fake):
+            with self.assertRaisesRegex(RuntimeError, "does not support changing"):
+                self.link.command("bench_lock", 0)
+        self.assertFalse(any(command.startswith(("mww", "load_image")) for command in self.fake.commands))
+
+    def test_bench_lock_rejects_non_integer_and_out_of_range_before_probe_access(self):
+        for value in (-1, 2, True, False, 0.0, "0", None):
+            with self.subTest(value=value), patch.object(device_link.subprocess, "run", self.fake):
+                with self.assertRaises(RuntimeError):
+                    self.link.command("bench_lock", value)
+        self.assertEqual(self.fake.commands, [])
+
+    def test_bench_lock_ack_requires_lock_echo_and_stopped_outputs_for_both_states(self):
+        before = {"schema": 2, "valid_flags": 0x40, "command_ack_seq": 0}
+        for value in (0, 1):
+            for wrong in ({"outputs_locked_off": not bool(value)}, {"armed_mask": 1},
+                          {"applied_duty": [0, 0.001, 0]}, {"valid_flags": 0},
+                          {"applied_duty": []}):
+                ack = {"schema": 2, "valid_flags": 0x40, "command_ack_seq": 1,
+                       "command_result": 0, "outputs_locked_off": bool(value),
+                       "armed_mask": 0, "applied_duty": [0, 0, 0], **wrong}
+                with self.subTest(value=value, wrong=wrong), patch.object(self.link, "_read",
+                        side_effect=[(before, self.fake.mailbox), (ack, None)]), patch.object(self.link, "_run") as run:
+                    with self.assertRaises(RuntimeError):
+                        self.link.command("bench_lock", value)
+                    self.assertEqual(run.call_count, 1)
+
+    def test_bench_lock_uncertain_write_is_never_replayed(self):
+        before = {"schema": 2, "valid_flags": 0x40, "command_ack_seq": 0}
+        with patch.object(self.link, "_read", return_value=(before, self.fake.mailbox)), \
+                patch.object(self.link, "_run", side_effect=RuntimeError("uncertain")) as run:
+            with self.assertRaisesRegex(RuntimeError, "uncertain"):
+                self.link.command("bench_lock", 0)
+        self.assertEqual(run.call_count, 1)
 
     def test_wrong_mailbox_identity_prevents_every_write(self):
         self.fake.mailbox = bytes(32)

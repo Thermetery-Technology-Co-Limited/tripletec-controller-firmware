@@ -81,6 +81,7 @@ static control_result_t validate(const uint8_t *request, int32_t value)
     case CONTROL_HEARTBEAT:
         return value == 0 ? CONTROL_OK : CONTROL_BAD_VALUE;
     case CONTROL_SET_MODE:
+    case CONTROL_SET_BENCH_LOCK:
         return value == 0 || value == 1 ? CONTROL_OK : CONTROL_BAD_VALUE;
     case CONTROL_SET_MARGIN:
         return value >= 500 && value <= 20000 ? CONTROL_OK : CONTROL_BAD_VALUE;

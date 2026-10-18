@@ -1,0 +1,118 @@
+{
+  "schema": 2,
+  "sequence": 5572,
+  "uptime_ms": 665947,
+  "outputs_locked_off": false,
+  "valid_flags": 231,
+  "bench_lock_supported": true,
+  "commissioning_supported": true,
+  "sht31_errors": 0,
+  "ads1220_errors": 0,
+  "ambient_c": 29.769,
+  "rh_percent": 54.041,
+  "dewpoint_c": 19.474,
+  "target_c": 22.474,
+  "plate_c": [
+    27.673,
+    null,
+    null
+  ],
+  "ntc_adc_raw": [
+    -397355,
+    6822797,
+    6822257
+  ],
+  "current_adc_raw": [
+    2041,
+    420,
+    425
+  ],
+  "current_a_nominal": [
+    -0.061,
+    0.032,
+    0.047
+  ],
+  "applied_duty": [
+    0.0,
+    0.0,
+    0.0
+  ],
+  "active_faults": [
+    6146,
+    6194,
+    6194
+  ],
+  "loop_count": 656219,
+  "button_pressed": false,
+  "mode": 0,
+  "mode_name": "regulated",
+  "margin_c": 3.0,
+  "armed_mask": 0,
+  "desired_duty": [
+    0.0,
+    0.0,
+    0.0
+  ],
+  "command_ack_seq": 251,
+  "command_result": 0,
+  "command_result_name": "OK",
+  "adc_diagnostics": {
+    "schema": 1,
+    "sequence": 5572,
+    "uptime_ms": 665947,
+    "valid": true,
+    "acquisition_ok": true,
+    "reference_plausible": true,
+    "vrefint_adc_raw": 1484,
+    "estimated_vdda_v": 3.311,
+    "adc_errors": 0,
+    "reference_basis": "Nominal 1.20 V VREFINT; estimate only, not calibrated"
+  },
+  "current_limit_policy": {
+    "valid": true,
+    "schema": 1,
+    "sequence": 5572,
+    "uptime_ms": 665947,
+    "current_limits_a": [
+      15.0,
+      9.0,
+      9.0
+    ],
+    "current_limits_commissioned_mask": 0
+  },
+  "current_limits_a": [
+    15.0,
+    9.0,
+    9.0
+  ],
+  "current_limits_commissioned_mask": 0,
+  "commissioning": {
+    "valid": true,
+    "schema": 1,
+    "sequence": 5572,
+    "uptime_ms": 665947,
+    "state": 5,
+    "state_name": "complete",
+    "flags": 28,
+    "zero_valid": false,
+    "trip_verified": false,
+    "selftest_passed": true,
+    "drive": true,
+    "nominal_gain": true,
+    "stage_prepared": false,
+    "trip_a": 15.0,
+    "baseline_adc": 2043,
+    "peak_adc": 2317,
+    "last_adc": 2041,
+    "sample_count": 1428368,
+    "pulses": 2490,
+    "fault_code": 0,
+    "duration_ms": 30000,
+    "on_us": 5000,
+    "period_ms": 12,
+    "elapsed_ms": 30000,
+    "min_plate_c": 26.44,
+    "trip_adc": 0,
+    "trip_timer_us": 0
+  }
+}

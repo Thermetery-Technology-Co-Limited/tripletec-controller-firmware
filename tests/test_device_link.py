@@ -76,11 +76,12 @@ class FakeOpenOCD:
                             self.limit_words[4] = 15000
                         elif mailbox[3] == 8:
                             self.commission_words[4:12] = [3 if mailbox[4] == 1 else 5,
-                                                          21 if mailbox[4] == 0 else 23 if mailbox[4] == 1 else 31,
+                                                          21 if mailbox[4] in (0, 4) else 23 if mailbox[4] == 1 else 31,
                                                           15000, 2040, 2321, 2040, 256, 1]
-                            self.commission_words[13] = 10000 if mailbox[4] == 3 else 1000
-                            self.commission_words[15] = 5 if mailbox[4] == 3 else 20
-                            self.commission_words[16] = self.commission_words[13] if mailbox[4] in (2, 3) else 1
+                            self.commission_words[13] = 30000 if mailbox[4] in (3, 4) else 1000
+                            self.commission_words[14] = 5000 if mailbox[4] in (3, 4) else 1000
+                            self.commission_words[15] = 12 if mailbox[4] in (3, 4) else 20
+                            self.commission_words[16] = self.commission_words[13] if mailbox[4] in (2, 3, 4) else 1
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
 
@@ -392,7 +393,7 @@ class DeviceLinkTest(unittest.TestCase):
     def test_bad_commissioning_values_prevent_probe_access(self):
         for name, value in (("commission_prepare", 0), ("commission_prepare", 14999),
                             ("commission_prepare", True), ("commission_test", -1),
-                            ("commission_test", 4), ("commission_test", False)):
+                            ("commission_test", 5), ("commission_test", False)):
             with self.subTest(name=name, value=value), patch.object(device_link.subprocess, "run", self.fake):
                 with self.assertRaises(RuntimeError):
                     self.link.command(name, value)
@@ -408,7 +409,7 @@ class DeviceLinkTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "Verify"):
                 self.link.command("commission_test", 2)
 
-    def test_ten_second_observation_uses_twenty_percent_profile_after_trip_verification(self):
+    def test_thirty_second_observation_uses_five_of_twelve_ms_pwm_after_trip_verification(self):
         self.enable_commissioning()
         with patch.object(device_link.subprocess, "run", self.fake):
             self.link.command("commission_prepare", 15000)
@@ -417,18 +418,18 @@ class DeviceLinkTest(unittest.TestCase):
             self.link.command("commission_test", 1)
             result = self.link.command("commission_test", 3)
             self.assertEqual(struct.unpack("<8I", self.fake.mailbox)[3:5], (8, 3))
-            self.assertEqual(result["commissioning"]["duration_ms"], 10000)
-            self.assertEqual(result["commissioning"]["period_ms"], 5)
-            self.assertEqual(result["commissioning"]["on_us"], 1000)
+            self.assertEqual(result["commissioning"]["duration_ms"], 30000)
+            self.assertEqual(result["commissioning"]["period_ms"], 12)
+            self.assertEqual(result["commissioning"]["on_us"], 5000)
             self.assertTrue(result["commissioning"]["drive"])
             # A completed observation may be requested again only by another command.
             before = sum(command.startswith("load_image") for command in self.fake.commands)
             self.link.read_status()
             self.assertEqual(sum(command.startswith("load_image") for command in self.fake.commands), before)
             result = self.link.command("commission_test", 3)
-            self.assertEqual(result["commissioning"]["duration_ms"], 10000)
+            self.assertEqual(result["commissioning"]["duration_ms"], 30000)
 
-    def test_ten_second_observation_rejects_incomplete_protection_prerequisites_without_writes(self):
+    def test_thirty_second_observation_rejects_incomplete_protection_prerequisites_without_writes(self):
         self.enable_commissioning()
         with patch.object(device_link.subprocess, "run", self.fake):
             self.link.command("commission_prepare", 15000)
@@ -443,6 +444,22 @@ class DeviceLinkTest(unittest.TestCase):
                 self.assertFalse(any(command.startswith(("mww", "load_image"))
                                      for command in self.fake.commands[start:]))
                 self.fake.commission_words = saved
+
+    def test_hidden_long_dry_run_does_not_require_or_claim_trip_verification(self):
+        self.enable_commissioning()
+        with patch.object(device_link.subprocess, "run", self.fake):
+            with self.assertRaisesRegex(RuntimeError, "Prepare"):
+                self.link.command("commission_test", 4)
+            self.link.command("commission_prepare", 15000)
+            result = self.link.command("commission_test", 4)
+            self.assertEqual(struct.unpack("<8I", self.fake.mailbox)[3:5], (8, 4))
+            self.assertEqual(result["commissioning"]["duration_ms"], 30000)
+            self.assertEqual(result["commissioning"]["on_us"], 5000)
+            self.assertEqual(result["commissioning"]["period_ms"], 12)
+            self.assertFalse(result["commissioning"]["trip_verified"])
+            self.assertFalse(result["commissioning"]["drive"])
+            with self.assertRaisesRegex(RuntimeError, "Verify"):
+                self.link.command("commission_test", 3)
 
     def test_bad_commissioning_block_preserves_stop_but_blocks_commissioning(self):
         self.enable_commissioning()

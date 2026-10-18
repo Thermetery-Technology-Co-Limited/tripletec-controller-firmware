@@ -11,7 +11,7 @@ enum { IDLE, PREPARED, TRIP_TEST, TRIP_PASSED, RUNNING, COMPLETE, FAULT };
 enum { ZERO_VALID = 1, TRIP_VERIFIED = 2, SELFTEST = 4, DRIVE = 8, NOMINAL_GAIN = 16 };
 static struct {
     uint32_t state, flags, fault, trip_ma, baseline, zero_at, started, last_pulse;
-    uint32_t pulses, kind, elapsed, duration, period;
+    uint32_t pulses, kind, elapsed, duration, period, on_us;
     bool have_pulse;
     float min_plate;
     commission_stage_status_t capture;
@@ -31,6 +31,7 @@ void commissioning_init(void)
     session.flags = NOMINAL_GAIN;
     session.duration = 1000U;
     session.period = 20U;
+    session.on_us = 1000U;
     session.min_plate = NAN;
 }
 
@@ -124,26 +125,28 @@ control_result_t commissioning_start(const tec_inputs_t *in, const tec_controlle
                                      bool bench_locked, int32_t kind, uint32_t now)
 {
     float target;
-    if (kind < 0 || kind > 3) { return CONTROL_BAD_VALUE; }
+    if (kind < 0 || kind > 4) { return CONTROL_BAD_VALUE; }
     if (commissioning_active() || session.state == FAULT ||
         !(session.flags & ZERO_VALID) || now - session.zero_at > 300000U ||
-        (kind >= 2 && !(session.flags & TRIP_VERIFIED)) ||
+        ((kind == 2 || kind == 3) && !(session.flags & TRIP_VERIFIED)) ||
         guard(in, ctrl, bench_locked, now, 1.0f, &target)) { return CONTROL_INTERLOCK; }
     const uint16_t delta = kind == 1 ? 163U : 491U;
     /* Every activation repeats the OFF-only ADC/watchdog self-test. */
-    if (!commission_stage_prepare((uint16_t)session.baseline, delta, kind != 0)) {
+    const bool drive = kind != 0 && kind != 4;
+    if (!commission_stage_prepare((uint16_t)session.baseline, delta, drive)) {
         commission_stage_stop();
         session.state = FAULT; session.fault = 3U; return CONTROL_INTERLOCK;
     }
-    if (kind == 3 && !commission_stage_set_period(5U)) {
+    if (kind >= 3 && !commission_stage_set_profile(5000U, 12U)) {
         commission_stage_stop();
         session.state = FAULT; session.fault = 3U; return CONTROL_INTERLOCK;
     }
     session.kind = (uint32_t)kind;
-    session.duration = kind == 3 ? 10000U : 1000U;
-    session.period = kind == 3 ? 5U : 20U;
+    session.duration = kind >= 3 ? 30000U : 1000U;
+    session.period = kind >= 3 ? 12U : 20U;
+    session.on_us = kind >= 3 ? 5000U : 1000U;
     session.flags &= ~DRIVE;
-    if (kind != 0) { session.flags |= DRIVE; }
+    if (drive) { session.flags |= DRIVE; }
     session.started = board_millis();
     session.last_pulse = session.started;
     session.have_pulse = false;
@@ -210,7 +213,7 @@ void commissioning_snapshot(commission_telemetry_t *dest, uint32_t now)
         .trip_ma = session.trip_ma, .baseline_adc = session.baseline,
         .peak_adc = session.capture.peak_adc, .last_adc = session.capture.last_adc,
         .sample_count = session.capture.samples, .pulses = session.pulses,
-        .fault_code = session.fault, .duration_ms = session.duration, .on_us = 1000U, .period_ms = session.period,
+        .fault_code = session.fault, .duration_ms = session.duration, .on_us = session.on_us, .period_ms = session.period,
         .elapsed_ms = session.elapsed,
         .min_plate_mc = isfinite(session.min_plate) ? (int32_t)lroundf(session.min_plate * 1000.0f) : INT32_MIN,
         .trip_adc = session.capture.trip_adc, .trip_timer_us = session.capture.trip_timer_us

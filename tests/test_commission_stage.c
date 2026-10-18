@@ -252,12 +252,61 @@ static void test_period_selection(void)
     commission_stage_stop();
 }
 
+static void test_profile_selection(void)
+{
+    reset();
+    assert(!commission_stage_set_profile(5000u, 12u));
+    prepare(false);
+    const uint32_t invalid[][2] = {
+        {0u, 12u}, {1000u, 0u}, {1000u, 12u}, {5000u, 5u}, {5000u, 20u},
+        {12000u, 12u}, {10000u, 20u}, {UINT32_MAX, UINT32_MAX}
+    };
+    for (size_t i = 0u; i < sizeof(invalid) / sizeof(invalid[0]); ++i) {
+        assert(!commission_stage_set_profile(invalid[i][0], invalid[i][1]));
+        assert(TIM2_ARR == 1000u && minimum_period_ms == 20u);
+    }
+    assert(commission_stage_set_profile(1000u, 5u));
+    assert(commission_stage_set_profile(1000u, 20u));
+    GPIOA_IDR = BIT(1);
+    assert(!commission_stage_set_profile(5000u, 12u));
+    GPIOA_IDR = 0u;
+    state.tripped = true;
+    assert(!commission_stage_set_profile(5000u, 12u));
+    state.tripped = false;
+    TIM2_CR1 = 1u;
+    assert(!commission_stage_set_profile(5000u, 12u));
+    TIM2_CR1 = 0u;
+    assert(commission_stage_set_profile(5000u, 12u));
+    assert(TIM2_ARR == 5000u && TIM2_CCR2 == 1u && TIM2_PSC == 71u);
+    assert(minimum_period_ms == 12u && pulse_on_us == 5000u);
+    assert(commission_stage_pulse());
+    assert(TIM2_CR1 == 9u && TIM2_ARR == 5000u);
+    assert((GPIOA_CRL & 0xfff0u) == 0x2220u); /* GPIO-LOW dry run. */
+    assert(!commission_stage_set_profile(1000u, 20u));
+    TIM2_CR1 &= ~BIT(0); /* Model independent one-pulse timer completion. */
+    TIM2_CNT = 0u;
+    test_ms = 11u; conversion();
+    assert(!commission_stage_pulse());
+    test_ms = 12u; conversion();
+    assert(commission_stage_pulse());
+    TIM2_CNT = 2900u;
+    test_adc = 2531u; conversion();
+    assert(state.tripped && TIM2_CR1 == 0u && TIM2_CCER == 0u);
+    assert(state.trip_timer_us == 2900u);
+    commission_stage_stop();
+    test_adc = 2040u;
+    prepare(true);
+    assert(TIM2_ARR == 1000u && pulse_on_us == 1000u && minimum_period_ms == 20u);
+    commission_stage_stop();
+}
+
 int main(void)
 {
     test_real_and_dry_pulse();
     test_thresholds_and_trip();
     test_interlocks();
     test_period_selection();
+    test_profile_selection();
     puts("commission stage register-model tests passed");
     return 0;
 }

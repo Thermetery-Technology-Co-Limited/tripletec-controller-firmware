@@ -95,7 +95,7 @@ def commissioning_result_text(commissioning):
         text += f" · peak {peak:.2f} A nominal"
     if commissioning.get("pulses"):
         text += f" · {commissioning['pulses']} pulse(s)"
-    if commissioning.get("duration_ms") in (1000, 10000) and state in (4, 5, 6):
+    if commissioning.get("duration_ms") in (1000, 30000) and state in (4, 5, 6):
         text += f" · {commissioning['duration_ms'] / 1000:g} s maximum"
     if state == 6:
         faults = {1: "preflight", 2: "zero current", 3: "power-stage self-test",
@@ -416,13 +416,13 @@ class Dashboard:
         commission.grid(row=8, column=0, columnspan=5, sticky="ew", padx=16, pady=(2, 12))
         self._label(commission, "TEC1 COMMISSIONING · 15 A provisional trip", size=10,
                     color="accent", bold=True).pack(anchor="w")
-        self._label(commission, "15 A provisional shutdown trip, not constant-current regulation. Observation: 1 ms pulses every 5 ms (20% duty), 10 s maximum. Each action requires your click; gain remains nominal.",
+        self._label(commission, "15 A provisional shutdown trip. Observation: 5 ms pulses every 12 ms (41.7% PWM), 30 s maximum; this is not 5 V DC. Each action requires your click; gain remains nominal.",
                     size=9, color="amber", wraplength=1000).pack(anchor="w", pady=(3, 6))
         self.commission_buttons = {}
         for action, title in (("prepare", "Prepare TEC1 / zero current"),
                               ("verify", "Verify shutdown (5 A, 1 ms)"),
                               ("run", "Run TEC1 (15 A trip, 1 s max)"),
-                              ("observe", "Observe cooling (20%, 10 s max)")):
+                              ("observe", "Observe cooling (41.7%, 30 s max)")):
             button = self._button(commission, title, lambda value=action: self.commission_tec1(value))
             button.pack(anchor="w", pady=2)
             self.commission_buttons[action] = button

@@ -295,7 +295,7 @@ class DeviceLink:
                 (name == "mode" and value not in (0, 1)) or
                 (name == "bench_lock" and value not in (0, 1)) or
                 (name == "commission_prepare" and value != 15000) or
-                (name == "commission_test" and value not in (0, 1, 2, 3)) or
+                (name == "commission_test" and value not in (0, 1, 2, 3, 4)) or
                 (name == "margin" and not 500 <= value <= 20000) or
                 (name == "arm" and not 1 <= value <= 7)):
             raise RuntimeError("Command value is outside its allowed range")

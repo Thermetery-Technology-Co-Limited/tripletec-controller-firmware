@@ -240,7 +240,7 @@ class WorkerTest(unittest.TestCase):
             with patch.object(self.link, "read_status", return_value=reported):
                 self.worker.submit(0, "poll")
                 self.assertEqual(self.event()[1], "status")
-        for duration in (1000, 10000):
+        for duration in (1000, 30000):
             reported = commissioning_bench_status(commissioning=completed_commissioning_status(
                 duration_ms=duration))
             with patch.object(self.link, "read_status", return_value=reported):
@@ -518,7 +518,7 @@ class CommissioningControlsTest(unittest.TestCase):
             reported = commissioning_bench_status(commissioning=commissioning_status(state=state))
             with patch.object(app.time, "monotonic", return_value=101.0):
                 dashboard._accept_status(reported)
-        for duration in (1000, 10000):
+        for duration in (1000, 30000):
             reported = commissioning_bench_status(commissioning=completed_commissioning_status(
                 duration_ms=duration))
             with patch.object(app.time, "monotonic", return_value=101.0):
@@ -563,7 +563,7 @@ class CommissioningControlsTest(unittest.TestCase):
 
     def test_result_reports_run_duration_only_for_running_and_finished_attempts(self):
         for state in (4, 5, 6):
-            for duration in (1000, 10000):
+            for duration in (1000, 30000):
                 text = app.commissioning_result_text(commissioning_status(state=state, duration_ms=duration))
                 with self.subTest(state=state, duration=duration):
                     self.assertIn(f"{duration // 1000} s maximum", text)

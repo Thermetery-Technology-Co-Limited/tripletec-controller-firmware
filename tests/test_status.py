@@ -193,33 +193,36 @@ class StatusTest(unittest.TestCase):
             with self.subTest(field=field), self.assertRaises(ValueError):
                 status.consistent_commissioning(changed, changed)
 
-    def test_commissioning_allows_ten_second_twenty_percent_profile_only_during_or_after_run(self):
+    def test_commissioning_allows_thirty_second_five_twelfths_profile_only_during_or_after_run(self):
         for state in (4, 5, 6):
             with self.subTest(state=state):
-                payload = commissioning_frame(state=state, duration_ms=10000, period_ms=5)
+                payload = commissioning_frame(state=state, duration_ms=30000, on_us=5000, period_ms=12)
                 result = status.consistent_commissioning(payload, payload)
-                self.assertEqual(result["duration_ms"], 10000)
-                self.assertEqual(result["on_us"], 1000)
-                self.assertEqual(result["period_ms"], 5)
+                self.assertEqual(result["duration_ms"], 30000)
+                self.assertEqual(result["on_us"], 5000)
+                self.assertEqual(result["period_ms"], 12)
         for state in (0, 1, 2, 3):
-            payload = commissioning_frame(state=state, duration_ms=10000, period_ms=5)
+            payload = commissioning_frame(state=state, duration_ms=30000, on_us=5000, period_ms=12)
             with self.subTest(state=state), self.assertRaises(ValueError):
                 status.consistent_commissioning(payload, payload)
 
     def test_commissioning_observation_keeps_fixed_trip_and_pulse_profile(self):
         for state in (4, 5, 6):
-            for changes in ({"duration_ms": 9999}, {"duration_ms": 10001},
-                            {"trip_ma": 14999}, {"on_us": 1001}, {"period_ms": 21}):
-                payload = commissioning_frame(**{"state": state, "duration_ms": 10000,
-                                                 "period_ms": 5, **changes})
+            for changes in ({"duration_ms": 29999}, {"duration_ms": 30001},
+                            {"trip_ma": 14999}, {"on_us": 5001}, {"period_ms": 13}):
+                payload = commissioning_frame(**{"state": state, "duration_ms": 30000,
+                                                 "on_us": 5000, "period_ms": 12, **changes})
                 with self.subTest(state=state, changes=changes), self.assertRaises(ValueError):
                     status.consistent_commissioning(payload, payload)
 
     def test_commissioning_rejects_retired_duration_and_mixed_timing_profiles(self):
         for state in range(7):
-            for duration, period in ((5000, 20), (5000, 5), (10000, 20), (1000, 5)):
-                payload = commissioning_frame(state=state, duration_ms=duration, period_ms=period)
-                with self.subTest(state=state, duration=duration, period=period), self.assertRaises(ValueError):
+            for duration, on, period in ((5000, 1000, 20), (5000, 1000, 5),
+                                        (10000, 1000, 5), (10000, 1000, 20), (1000, 1000, 5),
+                                        (30000, 1000, 12), (30000, 5000, 20),
+                                        (1000, 5000, 12), (1000, 5000, 20)):
+                payload = commissioning_frame(state=state, duration_ms=duration, on_us=on, period_ms=period)
+                with self.subTest(state=state, duration=duration, on=on, period=period), self.assertRaises(ValueError):
                     status.consistent_commissioning(payload, payload)
 
     def test_commissioning_rejects_invalid_identity_states_and_fields(self):

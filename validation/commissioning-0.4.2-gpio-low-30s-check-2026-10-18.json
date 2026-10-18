@@ -1,0 +1,986 @@
+{
+  "boot": {
+    "schema": 2,
+    "sequence": 2,
+    "uptime_ms": 121,
+    "outputs_locked_off": true,
+    "valid_flags": 192,
+    "bench_lock_supported": true,
+    "commissioning_supported": true,
+    "sht31_errors": 0,
+    "ads1220_errors": 0,
+    "ambient_c": null,
+    "rh_percent": null,
+    "dewpoint_c": null,
+    "target_c": null,
+    "plate_c": [
+      null,
+      null,
+      null
+    ],
+    "ntc_adc_raw": [
+      -2147483648,
+      -2147483648,
+      -2147483648
+    ],
+    "current_adc_raw": [
+      0,
+      0,
+      0
+    ],
+    "current_a_nominal": [
+      null,
+      null,
+      null
+    ],
+    "applied_duty": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "active_faults": [
+      6678,
+      6678,
+      6678
+    ],
+    "loop_count": 0,
+    "button_pressed": false,
+    "mode": 0,
+    "mode_name": "regulated",
+    "margin_c": 3.0,
+    "armed_mask": 0,
+    "desired_duty": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "command_ack_seq": 0,
+    "command_result": 0,
+    "command_result_name": "OK",
+    "adc_diagnostics": {
+      "schema": 1,
+      "sequence": 2,
+      "uptime_ms": 121,
+      "valid": false,
+      "acquisition_ok": false,
+      "reference_plausible": false,
+      "vrefint_adc_raw": 0,
+      "estimated_vdda_v": null,
+      "adc_errors": 0,
+      "reference_basis": "Nominal 1.20 V VREFINT; estimate only, not calibrated"
+    },
+    "current_limit_policy": {
+      "valid": true,
+      "schema": 1,
+      "sequence": 2,
+      "uptime_ms": 121,
+      "current_limits_a": [
+        0.0,
+        9.0,
+        9.0
+      ],
+      "current_limits_commissioned_mask": 0
+    },
+    "current_limits_a": [
+      0.0,
+      9.0,
+      9.0
+    ],
+    "current_limits_commissioned_mask": 0,
+    "commissioning": {
+      "valid": true,
+      "schema": 1,
+      "sequence": 2,
+      "uptime_ms": 121,
+      "state": 0,
+      "state_name": "idle",
+      "flags": 16,
+      "zero_valid": false,
+      "trip_verified": false,
+      "selftest_passed": false,
+      "drive": false,
+      "nominal_gain": true,
+      "stage_prepared": false,
+      "trip_a": 0.0,
+      "baseline_adc": 0,
+      "peak_adc": 0,
+      "last_adc": 0,
+      "sample_count": 0,
+      "pulses": 0,
+      "fault_code": 0,
+      "duration_ms": 1000,
+      "on_us": 1000,
+      "period_ms": 20,
+      "elapsed_ms": 0,
+      "min_plate_c": null,
+      "trip_adc": 0,
+      "trip_timer_us": 0
+    }
+  },
+  "prepared": {
+    "schema": 2,
+    "sequence": 6,
+    "uptime_ms": 401,
+    "outputs_locked_off": true,
+    "valid_flags": 231,
+    "bench_lock_supported": true,
+    "commissioning_supported": true,
+    "sht31_errors": 0,
+    "ads1220_errors": 0,
+    "ambient_c": 30.066,
+    "rh_percent": 55.879,
+    "dewpoint_c": 20.289,
+    "target_c": 23.289,
+    "plate_c": [
+      27.798,
+      null,
+      null
+    ],
+    "ntc_adc_raw": [
+      -415664,
+      6822065,
+      6821859
+    ],
+    "current_adc_raw": [
+      2041,
+      416,
+      464
+    ],
+    "current_a_nominal": [
+      -0.198,
+      0.02,
+      0.166
+    ],
+    "applied_duty": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "active_faults": [
+      6146,
+      6162,
+      6162
+    ],
+    "loop_count": 260,
+    "button_pressed": false,
+    "mode": 0,
+    "mode_name": "regulated",
+    "margin_c": 3.0,
+    "armed_mask": 0,
+    "desired_duty": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "command_ack_seq": 1,
+    "command_result": 0,
+    "command_result_name": "OK",
+    "adc_diagnostics": {
+      "schema": 1,
+      "sequence": 6,
+      "uptime_ms": 401,
+      "valid": true,
+      "acquisition_ok": true,
+      "reference_plausible": true,
+      "vrefint_adc_raw": 1484,
+      "estimated_vdda_v": 3.311,
+      "adc_errors": 0,
+      "reference_basis": "Nominal 1.20 V VREFINT; estimate only, not calibrated"
+    },
+    "current_limit_policy": {
+      "valid": true,
+      "schema": 1,
+      "sequence": 6,
+      "uptime_ms": 401,
+      "current_limits_a": [
+        15.0,
+        9.0,
+        9.0
+      ],
+      "current_limits_commissioned_mask": 0
+    },
+    "current_limits_a": [
+      15.0,
+      9.0,
+      9.0
+    ],
+    "current_limits_commissioned_mask": 0,
+    "commissioning": {
+      "valid": true,
+      "schema": 1,
+      "sequence": 6,
+      "uptime_ms": 401,
+      "state": 1,
+      "state_name": "prepared",
+      "flags": 21,
+      "zero_valid": true,
+      "trip_verified": false,
+      "selftest_passed": true,
+      "drive": false,
+      "nominal_gain": true,
+      "stage_prepared": false,
+      "trip_a": 15.0,
+      "baseline_adc": 2043,
+      "peak_adc": 0,
+      "last_adc": 0,
+      "sample_count": 0,
+      "pulses": 0,
+      "fault_code": 0,
+      "duration_ms": 1000,
+      "on_us": 1000,
+      "period_ms": 20,
+      "elapsed_ms": 0,
+      "min_plate_c": 27.798,
+      "trip_adc": 0,
+      "trip_timer_us": 0
+    }
+  },
+  "snapshots": [
+    {
+      "sequence": 8,
+      "uptime_ms": 637,
+      "plate_c": 27.801,
+      "state": "running",
+      "elapsed_ms": 0,
+      "sample_count": 14,
+      "pulses": 0,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 14,
+      "uptime_ms": 1188,
+      "plate_c": 27.8,
+      "state": "running",
+      "elapsed_ms": 550,
+      "sample_count": 26237,
+      "pulses": 46,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 20,
+      "uptime_ms": 1725,
+      "plate_c": 27.8,
+      "state": "running",
+      "elapsed_ms": 1087,
+      "sample_count": 51806,
+      "pulses": 91,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 26,
+      "uptime_ms": 2269,
+      "plate_c": 27.8,
+      "state": "running",
+      "elapsed_ms": 1631,
+      "sample_count": 77706,
+      "pulses": 136,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 32,
+      "uptime_ms": 2826,
+      "plate_c": 27.799,
+      "state": "running",
+      "elapsed_ms": 2188,
+      "sample_count": 104227,
+      "pulses": 182,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 38,
+      "uptime_ms": 3372,
+      "plate_c": 27.796,
+      "state": "running",
+      "elapsed_ms": 2734,
+      "sample_count": 130224,
+      "pulses": 227,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 44,
+      "uptime_ms": 3893,
+      "plate_c": 27.8,
+      "state": "running",
+      "elapsed_ms": 3255,
+      "sample_count": 155031,
+      "pulses": 271,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 50,
+      "uptime_ms": 4439,
+      "plate_c": 27.799,
+      "state": "running",
+      "elapsed_ms": 3801,
+      "sample_count": 181028,
+      "pulses": 316,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 56,
+      "uptime_ms": 4975,
+      "plate_c": 27.796,
+      "state": "running",
+      "elapsed_ms": 4337,
+      "sample_count": 206549,
+      "pulses": 360,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 62,
+      "uptime_ms": 5519,
+      "plate_c": 27.796,
+      "state": "running",
+      "elapsed_ms": 4881,
+      "sample_count": 232466,
+      "pulses": 405,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 68,
+      "uptime_ms": 6060,
+      "plate_c": 27.797,
+      "state": "running",
+      "elapsed_ms": 5422,
+      "sample_count": 258209,
+      "pulses": 450,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 74,
+      "uptime_ms": 6601,
+      "plate_c": 27.799,
+      "state": "running",
+      "elapsed_ms": 5963,
+      "sample_count": 283968,
+      "pulses": 495,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 80,
+      "uptime_ms": 7142,
+      "plate_c": 27.796,
+      "state": "running",
+      "elapsed_ms": 6504,
+      "sample_count": 309726,
+      "pulses": 540,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 86,
+      "uptime_ms": 7672,
+      "plate_c": 27.797,
+      "state": "running",
+      "elapsed_ms": 7034,
+      "sample_count": 334957,
+      "pulses": 584,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 92,
+      "uptime_ms": 8204,
+      "plate_c": 27.8,
+      "state": "running",
+      "elapsed_ms": 7566,
+      "sample_count": 360287,
+      "pulses": 628,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 98,
+      "uptime_ms": 8723,
+      "plate_c": 27.801,
+      "state": "running",
+      "elapsed_ms": 8085,
+      "sample_count": 384998,
+      "pulses": 671,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 104,
+      "uptime_ms": 9273,
+      "plate_c": 27.798,
+      "state": "running",
+      "elapsed_ms": 8635,
+      "sample_count": 411185,
+      "pulses": 717,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 110,
+      "uptime_ms": 9843,
+      "plate_c": 27.8,
+      "state": "running",
+      "elapsed_ms": 9205,
+      "sample_count": 438324,
+      "pulses": 764,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 116,
+      "uptime_ms": 10378,
+      "plate_c": 27.802,
+      "state": "running",
+      "elapsed_ms": 9740,
+      "sample_count": 463797,
+      "pulses": 809,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 122,
+      "uptime_ms": 10916,
+      "plate_c": 27.8,
+      "state": "running",
+      "elapsed_ms": 10278,
+      "sample_count": 489412,
+      "pulses": 853,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 128,
+      "uptime_ms": 11458,
+      "plate_c": 27.801,
+      "state": "running",
+      "elapsed_ms": 10820,
+      "sample_count": 515219,
+      "pulses": 898,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 134,
+      "uptime_ms": 12016,
+      "plate_c": 27.798,
+      "state": "running",
+      "elapsed_ms": 11363,
+      "sample_count": 541786,
+      "pulses": 944,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 140,
+      "uptime_ms": 12540,
+      "plate_c": 27.799,
+      "state": "running",
+      "elapsed_ms": 11902,
+      "sample_count": 566736,
+      "pulses": 988,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 146,
+      "uptime_ms": 13067,
+      "plate_c": 27.802,
+      "state": "running",
+      "elapsed_ms": 12429,
+      "sample_count": 591827,
+      "pulses": 1032,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 152,
+      "uptime_ms": 13617,
+      "plate_c": 27.802,
+      "state": "running",
+      "elapsed_ms": 12979,
+      "sample_count": 618014,
+      "pulses": 1078,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 158,
+      "uptime_ms": 14167,
+      "plate_c": 27.8,
+      "state": "running",
+      "elapsed_ms": 13529,
+      "sample_count": 644199,
+      "pulses": 1123,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 164,
+      "uptime_ms": 14709,
+      "plate_c": 27.803,
+      "state": "running",
+      "elapsed_ms": 14071,
+      "sample_count": 670005,
+      "pulses": 1168,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 170,
+      "uptime_ms": 15236,
+      "plate_c": 27.802,
+      "state": "running",
+      "elapsed_ms": 14598,
+      "sample_count": 695098,
+      "pulses": 1212,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 176,
+      "uptime_ms": 15773,
+      "plate_c": 27.8,
+      "state": "running",
+      "elapsed_ms": 15135,
+      "sample_count": 720666,
+      "pulses": 1257,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 182,
+      "uptime_ms": 16316,
+      "plate_c": 27.8,
+      "state": "running",
+      "elapsed_ms": 15678,
+      "sample_count": 746520,
+      "pulses": 1301,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 188,
+      "uptime_ms": 16850,
+      "plate_c": 27.799,
+      "state": "running",
+      "elapsed_ms": 16212,
+      "sample_count": 771946,
+      "pulses": 1346,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 194,
+      "uptime_ms": 17393,
+      "plate_c": 27.802,
+      "state": "running",
+      "elapsed_ms": 16755,
+      "sample_count": 797799,
+      "pulses": 1391,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 200,
+      "uptime_ms": 17958,
+      "plate_c": 27.8,
+      "state": "running",
+      "elapsed_ms": 17320,
+      "sample_count": 824701,
+      "pulses": 1438,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 206,
+      "uptime_ms": 18506,
+      "plate_c": 27.799,
+      "state": "running",
+      "elapsed_ms": 17868,
+      "sample_count": 850792,
+      "pulses": 1483,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 212,
+      "uptime_ms": 19047,
+      "plate_c": 27.803,
+      "state": "running",
+      "elapsed_ms": 18409,
+      "sample_count": 876551,
+      "pulses": 1528,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 218,
+      "uptime_ms": 19583,
+      "plate_c": 27.8,
+      "state": "running",
+      "elapsed_ms": 18945,
+      "sample_count": 902071,
+      "pulses": 1573,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 224,
+      "uptime_ms": 20129,
+      "plate_c": 27.799,
+      "state": "running",
+      "elapsed_ms": 19491,
+      "sample_count": 928082,
+      "pulses": 1618,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 230,
+      "uptime_ms": 20666,
+      "plate_c": 27.801,
+      "state": "running",
+      "elapsed_ms": 20028,
+      "sample_count": 953632,
+      "pulses": 1663,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 236,
+      "uptime_ms": 21185,
+      "plate_c": 27.804,
+      "state": "running",
+      "elapsed_ms": 20547,
+      "sample_count": 978342,
+      "pulses": 1706,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 242,
+      "uptime_ms": 21716,
+      "plate_c": 27.804,
+      "state": "running",
+      "elapsed_ms": 21078,
+      "sample_count": 1003625,
+      "pulses": 1750,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 248,
+      "uptime_ms": 22272,
+      "plate_c": 27.804,
+      "state": "running",
+      "elapsed_ms": 21634,
+      "sample_count": 1030097,
+      "pulses": 1796,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 254,
+      "uptime_ms": 22806,
+      "plate_c": 27.802,
+      "state": "running",
+      "elapsed_ms": 22168,
+      "sample_count": 1055523,
+      "pulses": 1840,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 260,
+      "uptime_ms": 23349,
+      "plate_c": 27.803,
+      "state": "running",
+      "elapsed_ms": 22711,
+      "sample_count": 1081376,
+      "pulses": 1885,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 266,
+      "uptime_ms": 23897,
+      "plate_c": 27.806,
+      "state": "running",
+      "elapsed_ms": 23259,
+      "sample_count": 1107468,
+      "pulses": 1931,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 272,
+      "uptime_ms": 24424,
+      "plate_c": 27.803,
+      "state": "running",
+      "elapsed_ms": 23786,
+      "sample_count": 1132579,
+      "pulses": 1974,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 278,
+      "uptime_ms": 24934,
+      "plate_c": 27.805,
+      "state": "running",
+      "elapsed_ms": 24296,
+      "sample_count": 1156843,
+      "pulses": 2017,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 284,
+      "uptime_ms": 25461,
+      "plate_c": 27.808,
+      "state": "running",
+      "elapsed_ms": 24823,
+      "sample_count": 1181935,
+      "pulses": 2061,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 290,
+      "uptime_ms": 26016,
+      "plate_c": 27.809,
+      "state": "running",
+      "elapsed_ms": 25363,
+      "sample_count": 1208361,
+      "pulses": 2106,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 296,
+      "uptime_ms": 26557,
+      "plate_c": 27.808,
+      "state": "running",
+      "elapsed_ms": 25919,
+      "sample_count": 1234120,
+      "pulses": 2152,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 302,
+      "uptime_ms": 27103,
+      "plate_c": 27.806,
+      "state": "running",
+      "elapsed_ms": 26465,
+      "sample_count": 1260117,
+      "pulses": 2197,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 308,
+      "uptime_ms": 27646,
+      "plate_c": 27.81,
+      "state": "running",
+      "elapsed_ms": 27008,
+      "sample_count": 1285967,
+      "pulses": 2242,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 314,
+      "uptime_ms": 28184,
+      "plate_c": 27.812,
+      "state": "running",
+      "elapsed_ms": 27546,
+      "sample_count": 1311583,
+      "pulses": 2286,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 320,
+      "uptime_ms": 28724,
+      "plate_c": 27.811,
+      "state": "running",
+      "elapsed_ms": 28086,
+      "sample_count": 1337293,
+      "pulses": 2331,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 326,
+      "uptime_ms": 29257,
+      "plate_c": 27.809,
+      "state": "running",
+      "elapsed_ms": 28619,
+      "sample_count": 1362671,
+      "pulses": 2376,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 332,
+      "uptime_ms": 29829,
+      "plate_c": 27.813,
+      "state": "running",
+      "elapsed_ms": 29191,
+      "sample_count": 1389905,
+      "pulses": 2423,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 338,
+      "uptime_ms": 30379,
+      "plate_c": 27.812,
+      "state": "running",
+      "elapsed_ms": 29741,
+      "sample_count": 1416093,
+      "pulses": 2469,
+      "fault_code": 0,
+      "drive": false
+    },
+    {
+      "sequence": 344,
+      "uptime_ms": 30920,
+      "plate_c": 27.81,
+      "state": "complete",
+      "elapsed_ms": 30000,
+      "sample_count": 1428366,
+      "pulses": 2490,
+      "fault_code": 0,
+      "drive": false
+    }
+  ],
+  "agent_issued_energized_pulse": false,
+  "finished": {
+    "schema": 2,
+    "sequence": 344,
+    "uptime_ms": 30920,
+    "outputs_locked_off": true,
+    "valid_flags": 231,
+    "bench_lock_supported": true,
+    "commissioning_supported": true,
+    "sht31_errors": 0,
+    "ads1220_errors": 0,
+    "ambient_c": 30.108,
+    "rh_percent": 55.81,
+    "dewpoint_c": 20.309,
+    "target_c": 23.309,
+    "plate_c": [
+      27.81,
+      null,
+      null
+    ],
+    "ntc_adc_raw": [
+      -417488,
+      6823029,
+      6823004
+    ],
+    "current_adc_raw": [
+      2045,
+      416,
+      424
+    ],
+    "current_a_nominal": [
+      0.061,
+      0.02,
+      0.044
+    ],
+    "applied_duty": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "active_faults": [
+      6146,
+      6194,
+      6194
+    ],
+    "loop_count": 30334,
+    "button_pressed": false,
+    "mode": 0,
+    "mode_name": "regulated",
+    "margin_c": 3.0,
+    "armed_mask": 0,
+    "desired_duty": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "command_ack_seq": 58,
+    "command_result": 0,
+    "command_result_name": "OK",
+    "adc_diagnostics": {
+      "schema": 1,
+      "sequence": 344,
+      "uptime_ms": 30920,
+      "valid": true,
+      "acquisition_ok": true,
+      "reference_plausible": true,
+      "vrefint_adc_raw": 1484,
+      "estimated_vdda_v": 3.311,
+      "adc_errors": 0,
+      "reference_basis": "Nominal 1.20 V VREFINT; estimate only, not calibrated"
+    },
+    "current_limit_policy": {
+      "valid": true,
+      "schema": 1,
+      "sequence": 344,
+      "uptime_ms": 30920,
+      "current_limits_a": [
+        15.0,
+        9.0,
+        9.0
+      ],
+      "current_limits_commissioned_mask": 0
+    },
+    "current_limits_a": [
+      15.0,
+      9.0,
+      9.0
+    ],
+    "current_limits_commissioned_mask": 0,
+    "commissioning": {
+      "valid": true,
+      "schema": 1,
+      "sequence": 344,
+      "uptime_ms": 30920,
+      "state": 5,
+      "state_name": "complete",
+      "flags": 21,
+      "zero_valid": true,
+      "trip_verified": false,
+      "selftest_passed": true,
+      "drive": false,
+      "nominal_gain": true,
+      "stage_prepared": false,
+      "trip_a": 15.0,
+      "baseline_adc": 2043,
+      "peak_adc": 2067,
+      "last_adc": 2042,
+      "sample_count": 1428366,
+      "pulses": 2490,
+      "fault_code": 0,
+      "duration_ms": 30000,
+      "on_us": 5000,
+      "period_ms": 12,
+      "elapsed_ms": 30000,
+      "min_plate_c": 27.796,
+      "trip_adc": 0,
+      "trip_timer_us": 0
+    }
+  }
+}

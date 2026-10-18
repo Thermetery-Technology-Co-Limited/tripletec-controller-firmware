@@ -81,6 +81,7 @@ static bool drive_pin;
 static volatile uint32_t last_sample_ms;
 static uint32_t last_pulse_ms, last_pulse_samples;
 static uint32_t minimum_period_ms;
+static uint32_t pulse_on_us;
 static bool pulse_started;
 
 static uint32_t irq_save(void)
@@ -261,6 +262,7 @@ bool commission_stage_prepare(uint16_t baseline, uint16_t delta, bool drive)
     drive_pin = drive;
     pulse_started = false;
     minimum_period_ms = 20u;
+    pulse_on_us = 1000u;
     last_pulse_samples = 0u;
     DBGMCU_CR &= ~BIT(11); /* TIM2 must finish even when the CPU is halted. */
     AFIO_MAPR = (saved.afio_mapr & ~UINT32_C(0x07000300)) | BIT(25);
@@ -324,18 +326,33 @@ bool commission_stage_prepare(uint16_t baseline, uint16_t delta, bool drive)
     return true;
 }
 
-bool commission_stage_set_period(uint32_t period_ms)
+bool commission_stage_set_profile(uint32_t on_us, uint32_t period_ms)
 {
     const uint32_t mask = irq_save();
-    const bool valid = mask == 0u && (period_ms == 5u || period_ms == 20u) &&
+    const bool whitelisted = (on_us == 1000u && (period_ms == 5u || period_ms == 20u)) ||
+                             (on_us == 5000u && period_ms == 12u);
+    const bool valid = mask == 0u && whitelisted && on_us < period_ms * 1000u &&
                        state.prepared && state.selftest_passed && !state.tripped &&
                        !pulse_started && (GPIOA_IDR & OUTPUT_MASK) == 0u &&
-                       (TIM2_CR1 & BIT(0)) == 0u;
+                       (TIM2_CR1 & BIT(0)) == 0u && (ADC1_SR & ADC_AWD) == 0u;
     if (valid) {
         minimum_period_ms = period_ms;
+        pulse_on_us = on_us;
+        TIM2_CCER = 0u;
+        TIM2_PSC = 71u;
+        TIM2_ARR = pulse_on_us;
+        TIM2_CCR2 = 1u;
+        TIM2_EGR = BIT(0);
+        TIM2_CNT = 0u;
+        TIM2_SR = 0u;
     }
     irq_restore(mask);
     return valid;
+}
+
+bool commission_stage_set_period(uint32_t period_ms)
+{
+    return commission_stage_set_profile(1000u, period_ms);
 }
 
 bool commission_stage_pulse(void)
@@ -355,6 +372,8 @@ bool commission_stage_pulse(void)
     }
     TIM2_CCER = 0u;
     TIM2_CR1 = BIT(3); /* One pulse mode; CEN is set only at the final write. */
+    TIM2_ARR = pulse_on_us;
+    TIM2_CCR2 = 1u;
     TIM2_CNT = 0u;
     TIM2_SR = 0u;
     GPIOA_BSRR = OUTPUT_MASK << 16;

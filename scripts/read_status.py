@@ -112,15 +112,17 @@ def consistent_commissioning(first: bytes, second: bytes) -> dict:
         raise ValueError("Commissioning ADC values are invalid")
     # An idle block may contain its zero-initialized values before preparation.
     # Every active or finished attempt must identify the fixed test profile.
-    expected_profile = ((6, 15000), (14, 1000))
+    expected_profile = ((6, 15000),)
     if any(words[index] not in ((0, expected) if words[4] == 0 else (expected,))
            for index, expected in expected_profile):
         raise ValueError("Commissioning test profile is invalid")
     if words[4] == 0:
-        valid_timing = words[13] in (0, 1000) and words[15] in (0, 20)
+        valid_timing = (words[13] in (0, 1000) and words[14] in (0, 1000) and
+                        words[15] in (0, 20))
     else:
-        allowed_timings = ((1000, 20), (10000, 5)) if words[4] in (4, 5, 6) else ((1000, 20),)
-        valid_timing = (words[13], words[15]) in allowed_timings
+        allowed_timings = (((1000, 1000, 20), (30000, 5000, 12))
+                           if words[4] in (4, 5, 6) else ((1000, 1000, 20),))
+        valid_timing = (words[13], words[14], words[15]) in allowed_timings
     if not valid_timing:
         raise ValueError("Commissioning test timing profile is invalid")
     min_plate_mc = struct.unpack_from("<i", first, 68)[0]

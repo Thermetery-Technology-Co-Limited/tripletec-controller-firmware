@@ -10,6 +10,8 @@ Version 0.4.0 adds **TEC1 commissioning** over Pico SWD. Keep the bench lock ON,
 
 Version 0.4.1 adds **Observe cooling (20%, 10 s max)** for the operator's 500g copper block. After shutdown verification, this separate button requests 1ms pulses at least 5ms apart for at most 10 seconds, retaining the provisional 15A trip and temperature/link guards. It requires a separate click and never repeats automatically. Zero-offset preparation expires after five minutes; the GUI disables tests when that evidence expires. Active tests poll at 200ms intervals to maintain the 1.5s command lease. Each pulse still has an independent hardware stop. Reflashing clears the preparation and shutdown-verification state.
 
+Version 0.4.2 replaces that observation button with the operator-requested **Observe cooling (41.7%, 30 s max)**: nominal 5ms pulses every 12ms, a 30s maximum and the same provisional 15A trip and temperature/link guards. It requires the shutdown test to pass after reset and a separate operator click. With a nominal 12V supply this has about a 5V time average; the output is pulsed supply voltage, not regulated 5V DC. No TEC-terminal or 12V-rail voltage measurement is present. The backend also supports a GPIO-LOW version of this exact timer/lease profile for preflight; it never connects the timer to PA1.
+
 ```powershell
 python -m gui --connect
 ```

@@ -22,7 +22,7 @@ static uint16_t adc_a, adc_b, vref;
 static bool alternate, split_samples;
 static bool prepare_ok, selftest_ok, pin_ok, pulse_ok;
 static uint16_t prepared_baseline, prepared_delta;
-static uint32_t prepared_period;
+static uint32_t prepared_period, prepared_on_us;
 static bool prepared_drive;
 static uint32_t pulse_times[8192];
 
@@ -48,18 +48,26 @@ bool commission_stage_prepare(uint16_t baseline, uint16_t delta, bool drive)
     prepared_delta = delta;
     prepared_drive = drive;
     prepared_period = 20U;
+    prepared_on_us = 1000U;
     stage = (commission_stage_status_t){.prepared = prepare_ok,
         .selftest_passed = selftest_ok, .pin_low = pin_ok,
         .samples = 32U, .last_adc = baseline, .peak_adc = baseline};
     return prepare_ok;
 }
 
-bool commission_stage_set_period(uint32_t period_ms)
+bool commission_stage_set_profile(uint32_t on_us, uint32_t period_ms)
 {
     assert(stage.prepared && !stage.tripped && stage.pin_low && !stage.timer_running);
-    assert(period_ms == 5U || period_ms == 20U);
+    assert((on_us == 1000U && (period_ms == 5U || period_ms == 20U)) ||
+           (on_us == 5000U && period_ms == 12U));
     prepared_period = period_ms;
+    prepared_on_us = on_us;
     return true;
+}
+
+bool commission_stage_set_period(uint32_t period_ms)
+{
+    return commission_stage_set_profile(1000U, period_ms);
 }
 
 bool commission_stage_pulse(void)
@@ -85,8 +93,8 @@ static commission_telemetry_t snapshot(void)
     memset(&result, 0, sizeof(result));
     commissioning_snapshot(&result, now_ms);
     assert(result.magic == 0x5445434dU && result.schema == 1U);
-    assert((result.duration_ms == 1000U || result.duration_ms == 10000U) &&
-           result.on_us == 1000U && (result.period_ms == 20U || result.period_ms == 5U));
+    assert((result.duration_ms == 1000U && result.on_us == 1000U && result.period_ms == 20U) ||
+           (result.duration_ms == 30000U && result.on_us == 5000U && result.period_ms == 12U));
     return result;
 }
 
@@ -137,11 +145,13 @@ static void start(int kind)
 {
     assert(commissioning_start(&inputs, &controller, true, kind, now_ms) == CONTROL_OK);
     assert(commissioning_active() && commissioning_owns_adc());
-    assert(prepared_drive == (kind != 0));
+    assert(prepared_drive == (kind != 0 && kind != 4));
     assert(prepared_delta == (kind == 1 ? 163U : 491U));
-    assert(snapshot().duration_ms == (kind == 3 ? 10000U : 1000U));
-    assert(snapshot().period_ms == (kind == 3 ? 5U : 20U));
-    assert(prepared_period == (kind == 3 ? 5U : 20U));
+    assert(snapshot().duration_ms == (kind >= 3 ? 30000U : 1000U));
+    assert(snapshot().period_ms == (kind >= 3 ? 12U : 20U));
+    assert(snapshot().on_us == (kind >= 3 ? 5000U : 1000U));
+    assert(prepared_period == (kind >= 3 ? 12U : 20U));
+    assert(prepared_on_us == (kind >= 3 ? 5000U : 1000U));
 }
 
 static void tick(uint32_t now)
@@ -232,7 +242,7 @@ static void test_explicit_commands_and_gates(void)
     assert(commissioning_start(&inputs, &controller, true, 0, now_ms) == CONTROL_INTERLOCK);
     prepare();
     assert(commissioning_start(&inputs, &controller, true, -1, now_ms) == CONTROL_BAD_VALUE);
-    assert(commissioning_start(&inputs, &controller, true, 4, now_ms) == CONTROL_BAD_VALUE);
+    assert(commissioning_start(&inputs, &controller, true, 5, now_ms) == CONTROL_BAD_VALUE);
     assert(commissioning_start(&inputs, &controller, true, 2, now_ms) == CONTROL_INTERLOCK);
     assert(commissioning_start(&inputs, &controller, true, 3, now_ms) == CONTROL_INTERLOCK);
     assert(commissioning_start(&inputs, &controller, false, 0, now_ms) == CONTROL_INTERLOCK);
@@ -356,7 +366,7 @@ static void complete_one_second(void)
     assert(!commissioning_active());
 }
 
-static void test_twenty_percent_thermal_step(void)
+static void test_forty_percent_thermal_step(void)
 {
     verify_trip();
     const tec_config_t config = controller.config;
@@ -365,26 +375,26 @@ static void test_twenty_percent_thermal_step(void)
 
     for (unsigned repeat = 0U; repeat < 2U; ++repeat) {
         const unsigned pulses_before = pulse_calls;
-        start(3); /* Each 10 s / 20% step requires a new explicit command. */
+        start(3); /* Each 30 s / 5-of-12 ms step needs a new explicit command. */
         assert(commissioning_start(&inputs, &controller, true, 3, now_ms) == CONTROL_INTERLOCK);
         const uint32_t started = now_ms;
         uint32_t heartbeat = started;
-        for (uint32_t at = started + 2U; at < started + 10000U; at += 5U) {
+        for (uint32_t at = started + 2U; at < started + 30000U; at += 12U) {
             refresh(at);
             if (at - heartbeat >= 1000U) { heartbeat = at; }
             commissioning_tick(&inputs, &controller, true, now_ms, heartbeat);
             assert(commissioning_active());
         }
-        assert(pulse_calls - pulses_before == 2000U);
-        tick(started + 10000U);
+        assert(pulse_calls - pulses_before == 2500U);
+        tick(started + 30000U);
         assert(snapshot().state == TEST_COMPLETE && snapshot().fault_code == 0U);
-        assert(snapshot().duration_ms == 10000U && snapshot().elapsed_ms == 10000U);
-        assert(snapshot().period_ms == 5U && snapshot().on_us == 1000U);
-        assert(snapshot().pulses == 2000U && !commissioning_active());
-        tick(started + 10020U);
-        assert(pulse_calls - pulses_before == 2000U); /* No automatic repeat. */
+        assert(snapshot().duration_ms == 30000U && snapshot().elapsed_ms == 30000U);
+        assert(snapshot().period_ms == 12U && snapshot().on_us == 5000U);
+        assert(snapshot().pulses == 2500U && !commissioning_active());
+        tick(started + 30020U);
+        assert(pulse_calls - pulses_before == 2500U); /* No automatic repeat. */
         for (unsigned i = pulses_before + 1U; i < pulse_calls; ++i) {
-            assert(pulse_times[i] - pulse_times[i - 1U] >= 5U);
+            assert(pulse_times[i] - pulse_times[i - 1U] >= 12U);
         }
         assert_normal_policy_unchanged(&config);
     }
@@ -396,6 +406,25 @@ static void test_twenty_percent_thermal_step(void)
     commissioning_tick(&inputs, &controller, true, now_ms, started);
     assert(snapshot().state == TEST_FAULT && snapshot().fault_code == 7U);
     assert(!commissioning_active()); /* Longer run still requires host leases. */
+}
+
+static void test_thirty_second_gpio_low_preflight(void)
+{
+    reset(); prepare();
+    assert((snapshot().flags & TEST_VERIFIED) == 0U);
+    assert(commissioning_start(&inputs, &controller, true, 3, now_ms) == CONTROL_INTERLOCK);
+    start(4);
+    assert(!prepared_drive && (snapshot().flags & TEST_DRIVE) == 0U);
+    const uint32_t started = now_ms;
+    for (uint32_t at = started + 2U; at < started + 30000U; at += 12U) { tick(at); }
+    assert(pulse_calls == 2500U && commissioning_active());
+    tick(started + 30000U);
+    assert(snapshot().state == TEST_COMPLETE && snapshot().pulses == 2500U);
+    assert(!commissioning_active() && !commissioning_owns_adc());
+    assert((snapshot().flags & (TEST_VERIFIED | TEST_DRIVE)) == 0U);
+    tick(started + 30020U);
+    assert(pulse_calls == 2500U);
+    assert(commissioning_start(&inputs, &controller, true, 3, now_ms) == CONTROL_INTERLOCK);
 }
 
 static void test_zero_evidence_expiry(void)
@@ -466,7 +495,8 @@ int main(void)
     test_dry_run_schedule_and_stop();
     test_trip_verification_and_guarded_run();
     test_bad_trip_proof();
-    test_twenty_percent_thermal_step();
+    test_forty_percent_thermal_step();
+    test_thirty_second_gpio_low_preflight();
     test_zero_evidence_expiry();
     test_live_guards();
     puts("commissioning engine tests passed");

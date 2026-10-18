@@ -6,6 +6,7 @@ called by the operator's separate GUI button, uses a hardware-timed test.
 from __future__ import annotations
 
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -18,15 +19,18 @@ import time
 import zlib
 
 try:
-    from .read_status import consistent_snapshot, consistent_adc_diagnostics, consistent_limit_configuration
+    from .read_status import (consistent_snapshot, consistent_adc_diagnostics,
+                              consistent_limit_configuration, consistent_commissioning)
 except ImportError:
-    from read_status import consistent_snapshot, consistent_adc_diagnostics, consistent_limit_configuration
+    from read_status import (consistent_snapshot, consistent_adc_diagnostics,
+                             consistent_limit_configuration, consistent_commissioning)
 
 ROOT = Path(__file__).resolve().parents[1]
 MAILBOX_MAGIC = 0x54454343
 PROTOCOL_VERSION = 1
 MAILBOX_SIZE = 32
-OPCODES = {"stop": 1, "mode": 2, "margin": 3, "arm": 4, "heartbeat": 5, "bench_lock": 6}
+OPCODES = {"stop": 1, "mode": 2, "margin": 3, "arm": 4, "heartbeat": 5, "bench_lock": 6,
+           "commission_prepare": 7, "commission_test": 8}
 PROBE_MUTEX = threading.RLock()
 SUBPROCESS_TIMEOUT = 5.0
 ACK_TIMEOUT = 3.0
@@ -56,6 +60,36 @@ def validate_bench_lock_ack(status: dict, value: int) -> None:
         raise RuntimeError("Controller ACK did not confirm stopped outputs after the bench lock change")
 
 
+def require_commissioning_support(status: dict) -> dict:
+    if status.get("schema") != 2 or not (status.get("valid_flags", 0) & 0x80):
+        raise RuntimeError("Connected firmware does not support guarded TEC1 commissioning")
+    commissioning = status.get("commissioning")
+    if not isinstance(commissioning, dict) or commissioning.get("valid") is not True:
+        raise RuntimeError("Fresh, valid TEC1 commissioning status is required")
+    return commissioning
+
+
+def require_commissioning_preflight(status: dict, name: str, value: int) -> None:
+    commissioning = require_commissioning_support(status)
+    if (status.get("outputs_locked_off") is not True or status.get("armed_mask") != 0 or
+            status.get("applied_duty") != [0, 0, 0] or status.get("desired_duty") != [0, 0, 0] or
+            status.get("mode") != 0 or status.get("margin_c", 0) < 3):
+        raise RuntimeError("TEC1 commissioning requires locked, stopped, regulated control with a 3 °C margin")
+    plate = status.get("plate_c", [None])[0]
+    target = status.get("target_c")
+    if (status.get("valid_flags", 0) & 0x27 != 0x27 or
+            type(plate) not in (int, float) or type(target) not in (int, float) or
+            not math.isfinite(plate) or not math.isfinite(target) or plate <= target + 1):
+        raise RuntimeError("TEC1 commissioning requires fresh probe 1 above target + 1 °C")
+    if commissioning.get("state") in (2, 4):
+        raise RuntimeError("A TEC1 commissioning test is already running")
+    if name == "commission_test":
+        if not commissioning.get("zero_valid") or not commissioning.get("selftest_passed"):
+            raise RuntimeError("Prepare TEC1 and zero current before requesting a test")
+        if value in (2, 3) and not commissioning.get("trip_verified"):
+            raise RuntimeError("Verify the TEC1 shutdown path before the guarded run")
+
+
 def _ram_region(address: object, length: int) -> int:
     if type(address) is not int or address % 4 or not 0x20000000 <= address <= 0x2000C000 - length:
         raise RuntimeError("Symbol metadata is outside aligned STM32F103RC SRAM; rebuild firmware")
@@ -74,6 +108,7 @@ class DeviceLink:
                  openocd: str | None = None):
         self.root = Path(root) if root is not None else ROOT
         self.serial = serial
+        self._commissioning_evidence_key = None
         self.openocd = str(openocd) if openocd else shutil.which("openocd")
         if serial and not re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", serial):
             raise ValueError("Invalid CMSIS-DAP serial number")
@@ -93,6 +128,10 @@ class DeviceLink:
                 if metadata.get("limit_configuration_size") != 32:
                     raise RuntimeError("Unsupported current-limit block size; rebuild firmware")
                 _ram_region(metadata["limit_configuration_address"], 32)
+            if "commissioning_address" in metadata:
+                if metadata.get("commissioning_size") != 80:
+                    raise RuntimeError("Unsupported commissioning block size; rebuild firmware")
+                _ram_region(metadata["commissioning_address"], 80)
             return metadata
         except (OSError, ValueError, KeyError, TypeError) as error:
             raise RuntimeError("Firmware symbol metadata missing or invalid; build firmware first") from error
@@ -146,6 +185,11 @@ class DeviceLink:
                 limit_snapshots = [directory / f"limit{i}.bin" for i in range(4)]
                 commands.extend(f"dump_image {_tcl_path(path)} {metadata['limit_configuration_address']:#x} 32"
                                 for path in limit_snapshots)
+            commission_snapshots = []
+            if "commissioning_address" in metadata:
+                commission_snapshots = [directory / f"commission{i}.bin" for i in range(4)]
+                commands.extend(f"dump_image {_tcl_path(path)} {metadata['commissioning_address']:#x} 80"
+                                for path in commission_snapshots)
             mailbox_path = directory / "mailbox.bin"
             if mailbox:
                 address = _ram_region(metadata.get("mailbox_address"), MAILBOX_SIZE)
@@ -185,6 +229,22 @@ class DeviceLink:
                                     break
                                 except ValueError:
                                     continue
+                        if commission_snapshots:
+                            status["commissioning"] = {
+                                "valid": False, "error": "No consistent, fresh commissioning snapshot"
+                            }
+                            for earlier, later in zip(commission_snapshots, commission_snapshots[1:]):
+                                try:
+                                    commissioning = consistent_commissioning(earlier.read_bytes(), later.read_bytes())
+                                    age = min((status["uptime_ms"] - commissioning["uptime_ms"]) & 0xFFFFFFFF,
+                                              (commissioning["uptime_ms"] - status["uptime_ms"]) & 0xFFFFFFFF)
+                                    if age > 2000:
+                                        raise ValueError("Commissioning status is stale")
+                                    status["commissioning"] = commissioning
+                                    self._record_commissioning(status)
+                                    break
+                                except ValueError:
+                                    continue
                         return status, mailbox_path.read_bytes() if mailbox else None
                     except ValueError:
                         continue
@@ -195,13 +255,38 @@ class DeviceLink:
     def read_status(self) -> dict:
         with PROBE_MUTEX:
             status = self._read(self._metadata())[0]
-            if status["schema"] == 2 and status["armed_mask"]:
+            commissioning = status.get("commissioning", {})
+            running = commissioning.get("valid") is True and commissioning.get("state") in (2, 4)
+            if status["schema"] == 2 and (status["armed_mask"] or running):
                 return self.command("heartbeat")
             return status
 
+    def _record_commissioning(self, status: dict) -> None:
+        """Persist changes, including completed runs shorter than a GUI poll."""
+        commissioning = status["commissioning"]
+        key = (commissioning["state"], commissioning["fault_code"],
+               commissioning["zero_valid"], commissioning["trip_verified"], commissioning["duration_ms"])
+        if key == self._commissioning_evidence_key:
+            return
+        self._commissioning_evidence_key = key
+        if commissioning["state"] == 0:
+            return
+        directory = Path(os.environ.get("LOCALAPPDATA", str(self.root / "build"))) / "TripleTECControl/tests"
+        try:
+            directory.mkdir(parents=True, exist_ok=True)
+            (directory / f"tec1-commission-{time.time_ns()}.json").write_text(
+                json.dumps(status, indent=2, allow_nan=False) + "\n", encoding="utf-8")
+        except OSError:
+            # Evidence storage cannot prevent STOP, a heartbeat, or fresh status.
+            pass
+
     def test_tec1_pulse(self) -> dict:
         from .tec1_pulse import run_tec1_pulse
-        return run_tec1_pulse(self)
+        with PROBE_MUTEX:
+            status = self._read(self._metadata())[0]
+            if status.get("valid_flags", 0) & 0x80:
+                raise RuntimeError("Use the current-protected commissioning tests instead of the legacy debug pulse")
+            return run_tec1_pulse(self)
 
     def command(self, name: str, value: int = 0) -> dict:
         if name not in OPCODES or type(value) is not int:
@@ -209,6 +294,8 @@ class DeviceLink:
         if ((name in ("stop", "heartbeat") and value != 0) or
                 (name == "mode" and value not in (0, 1)) or
                 (name == "bench_lock" and value not in (0, 1)) or
+                (name == "commission_prepare" and value != 15000) or
+                (name == "commission_test" and value not in (0, 1, 2, 3)) or
                 (name == "margin" and not 500 <= value <= 20000) or
                 (name == "arm" and not 1 <= value <= 7)):
             raise RuntimeError("Command value is outside its allowed range")
@@ -221,6 +308,8 @@ class DeviceLink:
                 raise RuntimeError("Connected firmware has read-only schema 1; load the matching image")
             if name == "bench_lock":
                 require_bench_lock_support(status)
+            if name in ("commission_prepare", "commission_test"):
+                require_commissioning_preflight(status, name, value)
             if mailbox is None or len(mailbox) != MAILBOX_SIZE:
                 raise RuntimeError("Command mailbox snapshot is incomplete")
             magic, version = struct.unpack_from("<2I", mailbox)
@@ -251,6 +340,13 @@ class DeviceLink:
                         raise RuntimeError("Controller ACK did not confirm stopped channels")
                     if name == "bench_lock":
                         validate_bench_lock_ack(acknowledged, value)
+                    if name in ("commission_prepare", "commission_test"):
+                        commissioning = require_commissioning_support(acknowledged)
+                        if commissioning.get("trip_a") != 15:
+                            raise RuntimeError("Controller ACK did not confirm the provisional 15 A trip")
+                        if name == "commission_prepare" and not (
+                                commissioning.get("zero_valid") and commissioning.get("selftest_passed")):
+                            raise RuntimeError("Controller ACK did not confirm current zero and OFF self-test")
                     return acknowledged
                 time.sleep(0.05)
             raise RuntimeError("Controller did not acknowledge the command; reconnect and check status")

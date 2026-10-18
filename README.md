@@ -1,10 +1,14 @@
 # TripleTECDriver firmware
 
-Firmware and a desktop GUI for the STM32F103RCT6 cooler controller. Regulated mode uses **target = max(0°C, dew point + 3°C)** by default. Unregulated mode requests maximum cooling and deliberately bypasses the dew-point target. The current bench image measures and reports sensors while holding all three TEC control pins LOW; selecting a mode cannot enable the power stage.
+Firmware and a desktop GUI for the STM32F103RCT6 cooler controller. Regulated mode uses **target = max(0°C, dew point + 3°C)** by default. Unregulated mode requests maximum cooling and deliberately bypasses the dew-point target. Normal control remains inhibited; selecting a mode cannot enable the power stage. A separate supervised TEC1 commissioning path can emit bounded, current-monitored pulses.
 
 Version 0.3.0 adds direct USB CDC control and a USB-first desktop connection option. The USB firmware is flashed, the clocks and SWD fallback are verified, but direct USB enumeration remains unverified: no STM32 USB device appears even after a known data-cable replug. The schematic omits the required external D+ pull-up. Keep the Pico connected until the hardware requirement and USB-only tests in [USB_CONTROL.md](USB_CONTROL.md) are complete.
 
 ## Desktop GUI
+
+Version 0.4.0 adds **TEC1 commissioning** over Pico SWD. Keep the bench lock ON, regulated mode selected and margin at least 3°C. **Prepare TEC1 / zero current** screens 128 off-state samples, applies a zero-offset adjustment and self-tests the ADC watchdog with the output held LOW. It selects the operator's provisional **15A trip** while retaining nominal gain and false full-commissioning flags. **Verify shutdown (5 A, 1 ms)** requests exactly one bounded pulse with a deliberately lower watchdog threshold; the firmware requires early shutdown and current returning near zero before marking the trip test passed. Only then is **Run TEC1 (15 A trip, 1 s max)** available: 1ms pulses at least 20ms apart, at most 5% duty for one second, with sensor/temperature/link guards and a latched ADC-triggered trip. There is no automatic progression or repeat. STOP cancels the test; normal Start remains inhibited. The legacy CPU-halted debug pulse is unavailable on this image. These tests do not establish calibrated current, continuous-operation readiness or a constant-current ceiling. See [COMMISSIONING.md](COMMISSIONING.md) for evidence.
+
+Version 0.4.1 adds **Observe cooling (20%, 10 s max)** for the operator's 500g copper block. After shutdown verification, this separate button requests 1ms pulses at least 5ms apart for at most 10 seconds, retaining the provisional 15A trip and temperature/link guards. It requires a separate click and never repeats automatically. Zero-offset preparation expires after five minutes; the GUI disables tests when that evidence expires. Active tests poll at 200ms intervals to maintain the 1.5s command lease. Each pulse still has an independent hardware stop. Reflashing clears the preparation and shutdown-verification state.
 
 ```powershell
 python -m gui --connect
@@ -75,7 +79,7 @@ The image is `build/stm32/tripletec-bench.elf`, with matching `.bin`, `.hex`, ma
 - A CRC-checked RAM command mailbox with sequence/acknowledgement handling for mode, margin, stop, arm and heartbeat commands. The bench image accepts settings but rejects arm commands. A two-second host lease disarms any future enabled channels after loss of communication.
 - Direct USB CDC with bounded packet framing, CRC/sequence validation, fixed buffers, no command replay, and session-change disarming. USB STATUS never renews the host lease. Both USB and SWD reach the same output-locked command handler.
 
-The bench application always sets `hardware_verified=false`, never arms the controller, never configures PWM alternate-function outputs, and repeatedly forces PA1/PA2/PA3 LOW. Since 0.3.2 its separate software bench-lock flag is operator controlled, but clearing that flag does not bypass the retained hardware/current inhibits. The control library is exercised with simulated inputs in native tests; simulated measurements are never substituted into live board readings.
+The normal application keeps `hardware_verified=false`, refuses normal ARM and forces PA1/PA2/PA3 LOW outside the supervised commissioning path. Since 0.3.2 its separate software bench-lock flag is operator controlled, but clearing that flag does not bypass the normal hardware/current inhibits. The 0.4.0 commissioning path keeps the CPU running, monitors TEC1 current continuously and uses a hardware one-pulse timer for every activation; TEC2/3 remain GPIO LOW. The control library is exercised with simulated inputs in native tests; simulated measurements are never substituted into live board readings.
 
 ## Board connections
 

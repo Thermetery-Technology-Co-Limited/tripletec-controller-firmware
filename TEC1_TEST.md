@@ -1,5 +1,7 @@
 # Operator-controlled TEC1 switching test
 
+Historical debug diagnostic: firmware 0.4.0 and later disable this CPU-halted action. Use the current-protected, running-MCU commissioning controls in [COMMISSIONING.md](COMMISSIONING.md) instead. The following records the earlier 0.3.x implementation and evidence.
+
 Desktop 0.3.1 adds **Test TEC1 (1 ms)** below channel telemetry. Each click requests one full-voltage pulse on TEC1/XT90, with hardware-timed automatic off and no automatic repeat. This is a switching/current-response test; a 1ms pulse is too short to establish cooling polarity or temperature regulation. The operator controls activation. Normal Start remains locked, and TEC1's operating current threshold stays unset.
 
 Use the existing Pico SWD connection, attached cold-face probe and operating hot-side cooling. The application requires fresh, stopped regulated-bench readings, a plausible near-zero current baseline, and probe 1 more than 1°C above the dew-point +3°C target. It rejects another firmware image. The initial physical check measured 0V across connected TEC1 while stopped, with the computer PSU's 12V present.

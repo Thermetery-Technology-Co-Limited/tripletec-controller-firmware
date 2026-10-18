@@ -29,6 +29,7 @@ def decode(data: bytes) -> dict:
         "schema": words[2], "sequence": words[1], "uptime_ms": words[3],
         "outputs_locked_off": bool(words[4]), "valid_flags": words[5],
         "bench_lock_supported": words[2] == 2 and bool(words[5] & 0x40),
+        "commissioning_supported": words[2] == 2 and bool(words[5] & 0x80),
         "sht31_errors": words[6], "ads1220_errors": words[7],
         "ambient_c": value(8), "rh_percent": value(9),
         "dewpoint_c": value(10), "target_c": value(11),
@@ -96,6 +97,49 @@ def consistent_limit_configuration(first: bytes, second: bytes) -> dict:
         "valid": True, "schema": words[2], "sequence": words[1], "uptime_ms": words[3],
         "current_limits_a": [value / 1000 for value in words[4:7]],
         "current_limits_commissioned_mask": words[7],
+    }
+
+
+def consistent_commissioning(first: bytes, second: bytes) -> dict:
+    if len(first) != 80 or len(second) != 80 or first[4:8] != second[4:8]:
+        raise ValueError("Commissioning snapshot changed or is incomplete")
+    words = struct.unpack("<20I", first)
+    if words[0] != 0x5445434D or words[2] != 1 or words[1] & 1:
+        raise ValueError("Commissioning identity or sequence is invalid")
+    if words[4] > 6 or words[5] & ~0x3F or words[12] > 9:
+        raise ValueError("Commissioning state, flags, or fault code is invalid")
+    if any(words[index] > 4095 for index in (7, 8, 9, 18)):
+        raise ValueError("Commissioning ADC values are invalid")
+    # An idle block may contain its zero-initialized values before preparation.
+    # Every active or finished attempt must identify the fixed test profile.
+    expected_profile = ((6, 15000), (14, 1000))
+    if any(words[index] not in ((0, expected) if words[4] == 0 else (expected,))
+           for index, expected in expected_profile):
+        raise ValueError("Commissioning test profile is invalid")
+    if words[4] == 0:
+        valid_timing = words[13] in (0, 1000) and words[15] in (0, 20)
+    else:
+        allowed_timings = ((1000, 20), (10000, 5)) if words[4] in (4, 5, 6) else ((1000, 20),)
+        valid_timing = (words[13], words[15]) in allowed_timings
+    if not valid_timing:
+        raise ValueError("Commissioning test timing profile is invalid")
+    min_plate_mc = struct.unpack_from("<i", first, 68)[0]
+    return {
+        "valid": True, "schema": words[2], "sequence": words[1], "uptime_ms": words[3],
+        "state": words[4], "state_name": {
+            0: "idle", 1: "prepared", 2: "trip_test", 3: "trip_passed",
+            4: "running", 5: "complete", 6: "fault",
+        }[words[4]],
+        "flags": words[5], "zero_valid": bool(words[5] & 1),
+        "trip_verified": bool(words[5] & 2), "selftest_passed": bool(words[5] & 4),
+        "drive": bool(words[5] & 8), "nominal_gain": bool(words[5] & 16),
+        "stage_prepared": bool(words[5] & 32), "trip_a": words[6] / 1000,
+        "baseline_adc": words[7], "peak_adc": words[8], "last_adc": words[9],
+        "sample_count": words[10], "pulses": words[11], "fault_code": words[12],
+        "duration_ms": words[13], "on_us": words[14], "period_ms": words[15],
+        "elapsed_ms": words[16],
+        "min_plate_c": None if min_plate_mc == INVALID else min_plate_mc / 1000,
+        "trip_adc": words[18], "trip_timer_us": words[19],
     }
 
 

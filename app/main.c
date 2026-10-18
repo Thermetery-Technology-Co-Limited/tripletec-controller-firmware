@@ -8,6 +8,7 @@
 #include "current.h"
 #include "usb_device.h"
 #include "usb_protocol.h"
+#include "commissioning.h"
 
 #include <limits.h>
 #include <math.h>
@@ -15,13 +16,14 @@
 #include <stdatomic.h>
 #include <string.h>
 
-#if !defined(BENCH_OUTPUT_LOCK) || BENCH_OUTPUT_LOCK != 1 || BOARD_TEC_OUTPUTS_LOCKED_OFF != 1
-#error This image must hold all TEC outputs off.
+#if !defined(BENCH_OUTPUT_LOCK) || BENCH_OUTPUT_LOCK != 1 || BOARD_NORMAL_OUTPUTS_LOCKED_OFF != 1
+#error Normal TEC operation must remain inhibited outside the bounded commissioning stage.
 #endif
 
 volatile bench_telemetry_t g_telemetry;
 volatile adc_diagnostics_telemetry_t g_adc_diagnostics;
 volatile limit_configuration_telemetry_t g_limit_configuration;
+volatile commission_telemetry_t g_commissioning;
 volatile control_mailbox_t g_command_mailbox = {
     .magic = CONTROL_MAILBOX_MAGIC, .version = CONTROL_PROTOCOL_VERSION
 };
@@ -99,13 +101,14 @@ static void publish(uint32_t now)
     bench_telemetry_t next = {0};
     adc_diagnostics_telemetry_t diagnostic = {0};
     limit_configuration_telemetry_t limits = {0};
+    commission_telemetry_t commissioning = {0};
     const uint32_t sequence = g_telemetry.seq;
     next.magic = UINT32_C(0x54454331);
     next.seq = sequence + 1U;
     next.schema = 2U;
     next.uptime_ms = now;
     next.outputs_locked = bench_outputs_locked ? 1U : 0U;
-    next.valid_flags = 1U << 6; /* Runtime bench-lock command is supported. */
+    next.valid_flags = (1U << 6) | (1U << 7); /* Lock toggle and commissioning. */
     next.sht_errors = sht_errors;
     next.ads_errors = ads_errors;
     limits.magic = UINT32_C(0x5445434c);
@@ -162,14 +165,19 @@ static void publish(uint32_t now)
     g_telemetry.seq = sequence + 1U;
     g_adc_diagnostics.seq = sequence + 1U;
     g_limit_configuration.seq = sequence + 1U;
+    g_commissioning.seq = sequence + 1U;
     atomic_thread_fence(memory_order_seq_cst);
     g_telemetry = next;
     g_adc_diagnostics = diagnostic;
     g_limit_configuration = limits;
+    commissioning_snapshot(&commissioning, now);
+    commissioning.seq = sequence + 1U;
+    g_commissioning = commissioning;
     atomic_thread_fence(memory_order_seq_cst);
     g_telemetry.seq = sequence + 2U;
     g_adc_diagnostics.seq = sequence + 2U;
     g_limit_configuration.seq = sequence + 2U;
+    g_commissioning.seq = sequence + 2U;
 }
 
 static void disarm_all(void)
@@ -177,6 +185,7 @@ static void disarm_all(void)
     for (size_t i = 0U; i < TEC_CHANNEL_COUNT; ++i) {
         (void)tec_controller_set_armed(&controller, i, false);
     }
+    commissioning_stop(8U, board_millis());
     board_outputs_force_off();
 }
 
@@ -184,13 +193,29 @@ static control_result_t apply_command(void *context, uint32_t opcode,
                                        int32_t value, uint32_t now_ms)
 {
     (void)context;
-    (void)now_ms;
     switch (opcode) {
     case CONTROL_STOP:
         disarm_all();
         return CONTROL_OK;
     case CONTROL_HEARTBEAT:
         return CONTROL_OK;
+    case CONTROL_COMMISSION_PREPARE: {
+        disarm_all();
+        const control_result_t result = commissioning_prepare(&inputs, &controller,
+                                                               bench_outputs_locked, value, now_ms);
+        if (result == CONTROL_OK) {
+            tec_config_t selected = controller.config;
+            selected.current_limit_a[0] = 15.0f;
+            /* A provisional selected trip is not calibration/commissioning. */
+            (void)tec_controller_init(&controller, &selected);
+            commission_telemetry_t zero;
+            commissioning_snapshot(&zero, board_millis());
+            current_config[0].zero_fraction = (float)zero.baseline_adc / 4095.0f;
+        }
+        return result;
+    }
+    case CONTROL_COMMISSION_TEST:
+        return commissioning_start(&inputs, &controller, bench_outputs_locked, value, now_ms);
     case CONTROL_SET_BENCH_LOCK:
         if (value != 0 && value != 1) {
             return CONTROL_BAD_VALUE;
@@ -239,6 +264,9 @@ static control_result_t usb_apply(void *context, uint8_t opcode,
         usb_device_session_generation() != usb_session_generation) {
         disarm_all();
         return CONTROL_INTERLOCK;
+    }
+    if (opcode == CONTROL_COMMISSION_PREPARE || opcode == CONTROL_COMMISSION_TEST) {
+        return CONTROL_INTERLOCK; /* Commissioning requires the Pico SWD extension. */
     }
     const uint32_t now = board_millis();
     command_protocol.last_valid_ms = now; /* Only validated non-STATUS requests call this. */
@@ -357,6 +385,7 @@ int main(void)
     size_t next_ads_channel = 0U;
 
     board_init();
+    commissioning_init();
     tec_config_defaults(&config);
     (void)tec_controller_init(&controller, &config);
     control_protocol_init(&command_protocol);
@@ -382,7 +411,7 @@ int main(void)
 
     for (;;) {
         uint32_t now = board_millis();
-        board_outputs_force_off();
+        if (!commissioning_active()) { board_outputs_force_off(); }
         ++loop_count;
 
         if (!sht.busy && (now - last_sht >= 500U || last_sht == 0U)) {
@@ -430,7 +459,7 @@ int main(void)
         }
 
         now = board_millis();
-        if (now - last_current >= 250U) {
+        if (!commissioning_owns_adc() && now - last_current >= 250U) {
             last_current = now;
             adc_acquired = board_adc_read_diagnostics(&adc_diagnostics, 25U);
             estimated_vdda_mv = adc_acquired && adc_diagnostics.vrefint_raw != 0U ?
@@ -462,6 +491,9 @@ int main(void)
         }
         if (control_protocol_poll(&command_protocol, &g_command_mailbox,
                                    apply_command, NULL, now)) {
+            /* Preparation performs bounded ADC sampling/self-tests. Its ACK
+             * timestamp must follow those operations, never precede zero_at. */
+            now = board_millis();
             tec_controller_step(&controller, &inputs, now, &outputs);
             publish(now); /* ACK describes applied state, never just receipt. */
             last_control = now;
@@ -483,6 +515,9 @@ int main(void)
             last_control = now;
             last_publish = now;
         }
+        now = board_millis();
+        commissioning_tick(&inputs, &controller, bench_outputs_locked, now,
+                            command_protocol.last_valid_ms);
         if (now - last_control >= 50U) {
             last_control = now;
             tec_controller_step(&controller, &inputs, now, &outputs);
@@ -497,7 +532,7 @@ int main(void)
         }
         uart_commands();
         usb_service();
-        board_outputs_force_off();
+        if (!commissioning_active()) { board_outputs_force_off(); }
         board_watchdog_feed();
         board_delay_ms(1U);
     }

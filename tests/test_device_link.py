@@ -22,6 +22,8 @@ class FakeOpenOCD:
         self.mailbox = struct.pack("<8I", device_link.MAILBOX_MAGIC, 1, 0, 0, 0, 0, 0, 0)
         self.adc_words = [0x54454344, 4, 1, 1000, 1489, 3300, 3, 0]
         self.limit_words = [0x5445434C, 4, 1, 1000, 0, 9000, 9000, 0]
+        self.commission_words = [0x5445434D, 4, 1, 1000, 0, 16, 0, 0, 0, 0,
+                                 0, 0, 0, 1000, 1000, 20, 0, 0x80000000, 0, 0]
         self.commands = []
         self.options = []
         self.reject = 0
@@ -41,6 +43,8 @@ class FakeOpenOCD:
                     data = struct.pack("<8I", *self.adc_words)
                 elif address == 0x20000400:
                     data = struct.pack("<8I", *self.limit_words)
+                elif address == 0x20000500:
+                    data = struct.pack("<20I", *self.commission_words)
                 else:
                     data = struct.pack("<40I", *self.words)
                 Path(path).write_bytes(data[:int(size)])
@@ -67,6 +71,16 @@ class FakeOpenOCD:
                             self.words[4] = mailbox[4]
                             self.words[34] = 0
                             self.words[24:27] = [0, 0, 0]
+                        elif mailbox[3] == 7:
+                            self.commission_words[4:11] = [1, 21, 15000, 2040, 2049, 2040, 128]
+                            self.limit_words[4] = 15000
+                        elif mailbox[3] == 8:
+                            self.commission_words[4:12] = [3 if mailbox[4] == 1 else 5,
+                                                          21 if mailbox[4] == 0 else 23 if mailbox[4] == 1 else 31,
+                                                          15000, 2040, 2321, 2040, 256, 1]
+                            self.commission_words[13] = 10000 if mailbox[4] == 3 else 1000
+                            self.commission_words[15] = 5 if mailbox[4] == 3 else 20
+                            self.commission_words[16] = self.commission_words[13] if mailbox[4] in (2, 3) else 1
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
 
@@ -305,6 +319,176 @@ class DeviceLinkTest(unittest.TestCase):
         ]), patch.object(self.link, "_run"):
             with self.assertRaisesRegex(RuntimeError, "echo"):
                 self.link.command("mode", 1)
+
+    def enable_commissioning(self):
+        metadata = json.loads(self.metadata.read_text())
+        metadata.update(commissioning_address=0x20000500, commissioning_size=80)
+        self.metadata.write_text(json.dumps(metadata))
+        self.fake.words[5] = 0xE7
+        self.fake.words[11:13] = [22000, 27000]
+        self.link._record_commissioning = lambda status: None
+
+    def test_optional_commissioning_reads_four_validated_snapshots(self):
+        self.enable_commissioning()
+        with patch.object(device_link.subprocess, "run", self.fake):
+            result = self.link.read_status()
+        self.assertTrue(result["commissioning"]["valid"])
+        self.assertEqual(result["commissioning"]["state"], 0)
+        self.assertIsNone(result["commissioning"]["min_plate_c"])
+        self.assertEqual(sum(command.endswith("0x20000500 80") for command in self.fake.commands), 4)
+        self.assertFalse(any(command.startswith(("mww", "load_image")) for command in self.fake.commands))
+
+    def test_legacy_debug_pulse_cannot_bypass_commissioning_firmware(self):
+        self.enable_commissioning()
+        with patch.object(device_link.subprocess, "run", self.fake), \
+                patch("scripts.tec1_pulse.run_tec1_pulse") as pulse:
+            with self.assertRaisesRegex(RuntimeError, "current-protected commissioning"):
+                self.link.test_tec1_pulse()
+            pulse.assert_not_called()
+        self.assertFalse(any(command.startswith(("mww", "load_image")) for command in self.fake.commands))
+
+    def test_commissioning_prepare_verify_and_run_are_separate_acknowledged_commands(self):
+        self.enable_commissioning()
+        with patch.object(device_link.subprocess, "run", self.fake):
+            result = self.link.command("commission_prepare", 15000)
+            self.assertTrue(result["commissioning"]["zero_valid"])
+            self.assertTrue(result["commissioning"]["selftest_passed"])
+            self.assertFalse(result["commissioning"]["trip_verified"])
+            self.assertEqual(struct.unpack("<8I", self.fake.mailbox)[3:5], (7, 15000))
+            before = len(self.fake.commands)
+            self.link.read_status()
+            self.assertFalse(any(command.startswith(("mww", "load_image"))
+                                 for command in self.fake.commands[before:]))
+            result = self.link.command("commission_test", 1)
+            self.assertTrue(result["commissioning"]["trip_verified"])
+            self.assertEqual(struct.unpack("<8I", self.fake.mailbox)[3:5], (8, 1))
+            result = self.link.command("commission_test", 2)
+            self.assertEqual(result["commissioning"]["state"], 5)
+            self.assertEqual(struct.unpack("<8I", self.fake.mailbox)[3:5], (8, 2))
+        self.assertEqual(sum(command.startswith("load_image") for command in self.fake.commands), 3)
+        self.assertEqual(self.fake.words[34], 0)
+        self.assertEqual(self.fake.limit_words[7], 0)
+
+    def test_commissioning_preflight_requires_capability_zero_and_verified_trip(self):
+        self.enable_commissioning()
+        for name, value, changes in (
+                ("commission_prepare", 15000, {5: 0x67}),
+                ("commission_prepare", 15000, {4: 0}),
+                ("commission_prepare", 15000, {32: 1}),
+                ("commission_prepare", 15000, {33: 2500}),
+                ("commission_prepare", 15000, {12: 23000}),
+                ("commission_test", 1, {}),
+                ("commission_test", 2, {})):
+            saved = self.fake.words.copy()
+            for index, value_changed in changes.items():
+                self.fake.words[index] = value_changed
+            with self.subTest(name=name, value=value, changes=changes), \
+                    patch.object(device_link.subprocess, "run", self.fake):
+                with self.assertRaises(RuntimeError):
+                    self.link.command(name, value)
+            self.fake.words = saved
+        self.assertFalse(any(command.startswith(("mww", "load_image")) for command in self.fake.commands))
+
+    def test_bad_commissioning_values_prevent_probe_access(self):
+        for name, value in (("commission_prepare", 0), ("commission_prepare", 14999),
+                            ("commission_prepare", True), ("commission_test", -1),
+                            ("commission_test", 4), ("commission_test", False)):
+            with self.subTest(name=name, value=value), patch.object(device_link.subprocess, "run", self.fake):
+                with self.assertRaises(RuntimeError):
+                    self.link.command(name, value)
+        self.assertEqual(self.fake.commands, [])
+
+    def test_dry_run_command_does_not_verify_the_real_shutdown_path(self):
+        self.enable_commissioning()
+        with patch.object(device_link.subprocess, "run", self.fake):
+            self.link.command("commission_prepare", 15000)
+            result = self.link.command("commission_test", 0)
+            self.assertEqual(struct.unpack("<8I", self.fake.mailbox)[3:5], (8, 0))
+            self.assertFalse(result["commissioning"]["trip_verified"])
+            with self.assertRaisesRegex(RuntimeError, "Verify"):
+                self.link.command("commission_test", 2)
+
+    def test_ten_second_observation_uses_twenty_percent_profile_after_trip_verification(self):
+        self.enable_commissioning()
+        with patch.object(device_link.subprocess, "run", self.fake):
+            self.link.command("commission_prepare", 15000)
+            with self.assertRaisesRegex(RuntimeError, "Verify"):
+                self.link.command("commission_test", 3)
+            self.link.command("commission_test", 1)
+            result = self.link.command("commission_test", 3)
+            self.assertEqual(struct.unpack("<8I", self.fake.mailbox)[3:5], (8, 3))
+            self.assertEqual(result["commissioning"]["duration_ms"], 10000)
+            self.assertEqual(result["commissioning"]["period_ms"], 5)
+            self.assertEqual(result["commissioning"]["on_us"], 1000)
+            self.assertTrue(result["commissioning"]["drive"])
+            # A completed observation may be requested again only by another command.
+            before = sum(command.startswith("load_image") for command in self.fake.commands)
+            self.link.read_status()
+            self.assertEqual(sum(command.startswith("load_image") for command in self.fake.commands), before)
+            result = self.link.command("commission_test", 3)
+            self.assertEqual(result["commissioning"]["duration_ms"], 10000)
+
+    def test_ten_second_observation_rejects_incomplete_protection_prerequisites_without_writes(self):
+        self.enable_commissioning()
+        with patch.object(device_link.subprocess, "run", self.fake):
+            self.link.command("commission_prepare", 15000)
+            self.link.command("commission_test", 1)
+            self.link.command("commission_test", 2)
+            for index, bad in ((4, 2), (4, 4), (5, 29), (5, 30), (5, 27), (13, 999)):
+                saved = self.fake.commission_words.copy()
+                self.fake.commission_words[index] = bad
+                start = len(self.fake.commands)
+                with self.subTest(index=index, bad=bad), self.assertRaises(RuntimeError):
+                    self.link.command("commission_test", 3)
+                self.assertFalse(any(command.startswith(("mww", "load_image"))
+                                     for command in self.fake.commands[start:]))
+                self.fake.commission_words = saved
+
+    def test_bad_commissioning_block_preserves_stop_but_blocks_commissioning(self):
+        self.enable_commissioning()
+        for index, bad in ((0, 0), (1, 3), (3, 100000), (4, 7), (5, 128), (7, 4096)):
+            saved = self.fake.commission_words.copy()
+            self.fake.commission_words[index] = bad
+            with self.subTest(index=index), patch.object(device_link.subprocess, "run", self.fake):
+                result = self.link.read_status()
+                self.assertFalse(result["commissioning"]["valid"])
+                with self.assertRaisesRegex(RuntimeError, "commissioning status"):
+                    self.link.command("commission_prepare", 15000)
+                result = self.link.command("stop")
+                self.assertEqual(result["armed_mask"], 0)
+                self.assertFalse(result["commissioning"]["valid"])
+            self.fake.commission_words = saved
+
+    def test_bad_commissioning_address_or_size_prevents_probe_access(self):
+        metadata = json.loads(self.metadata.read_text())
+        for address, size in ((0x40000000, 80), (0x2000BFB4, 80),
+                              (0x20000501, 80), (0x20000500, 76)):
+            self.metadata.write_text(json.dumps({**metadata, "commissioning_address": address,
+                                                 "commissioning_size": size}))
+            with self.subTest(address=address, size=size), patch.object(device_link.subprocess, "run", self.fake):
+                with self.assertRaises(RuntimeError):
+                    self.link.read_status()
+        self.assertEqual(self.fake.commands, [])
+
+    def test_active_commissioning_status_refreshes_lease_without_retrying_test(self):
+        self.enable_commissioning()
+        self.fake.commission_words[6] = 15000
+        for state in (2, 4):
+            self.fake.commission_words[4] = state
+            with self.subTest(state=state), patch.object(device_link.subprocess, "run", self.fake):
+                result = self.link.read_status()
+                self.assertEqual(result["commissioning"]["state"], state)
+                self.assertEqual(struct.unpack("<8I", self.fake.mailbox)[3:5], (5, 0))
+
+    def test_uncertain_commissioning_write_is_not_replayed(self):
+        self.enable_commissioning()
+        with patch.object(device_link.subprocess, "run", self.fake):
+            status = self.link.read_status()
+        with patch.object(self.link, "_read", return_value=(status, self.fake.mailbox)), \
+                patch.object(self.link, "_run", side_effect=RuntimeError("uncertain")) as run:
+            with self.assertRaisesRegex(RuntimeError, "uncertain"):
+                self.link.command("commission_prepare", 15000)
+        self.assertEqual(run.call_count, 1)
 
 
 if __name__ == "__main__":

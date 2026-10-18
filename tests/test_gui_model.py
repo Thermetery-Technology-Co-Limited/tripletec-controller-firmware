@@ -17,6 +17,16 @@ def status(**changes):
     return data
 
 
+def commissioning_status(**changes):
+    data = {"valid": True, "schema": 1, "state": 1, "flags": 21,
+            "zero_valid": True, "trip_verified": False, "selftest_passed": True,
+            "drive": False, "nominal_gain": True, "stage_prepared": False,
+            "trip_a": 15, "baseline_adc": 2040, "peak_adc": 2040,
+            "sample_count": 128, "pulses": 0, "fault_code": 0}
+    data.update(changes)
+    return data
+
+
 class PresentationTests(unittest.TestCase):
     def test_missing_and_nonfinite_readings_are_unknown(self):
         sample = Snapshot.from_status({"schema": 2}, 10.0)
@@ -68,6 +78,36 @@ class PresentationTests(unittest.TestCase):
                                              current_limits_commissioned_mask=0), 10)
         self.assertIsNone(sample.bench_lock_block_reason(True, 11, last_error="uncertain"))
         self.assertIsNotNone(sample.start_block_reason(True, 11))
+
+    def test_commissioning_busy_states_block_unlock_but_allow_relocking(self):
+        for state in (2, 4):
+            with self.subTest(state=state):
+                sample = Snapshot.from_status(status(valid_flags=0xE7,
+                    commissioning=commissioning_status(state=state)), 10)
+                self.assertTrue(sample.commissioning_running)
+                self.assertIsNotNone(sample.bench_lock_block_reason(True, 11))
+                sample = Snapshot.from_status(status(valid_flags=0xE7, outputs_locked_off=False,
+                    commissioning=commissioning_status(state=state)), 10)
+                self.assertIsNone(sample.bench_lock_block_reason(True, 11))
+        for state in (0, 1, 3, 5, 6):
+            sample = Snapshot.from_status(status(valid_flags=0xE7,
+                commissioning=commissioning_status(state=state)), 10)
+            self.assertFalse(sample.commissioning_running)
+
+    def test_malformed_commissioning_preserves_normal_status_and_stop_capability(self):
+        malformed = ([], "invalid", 1, commissioning_status(state=True),
+                     commissioning_status(state=7), commissioning_status(flags=64),
+                     commissioning_status(zero_valid=1), commissioning_status(trip_verified=None),
+                     commissioning_status(selftest_passed="true"), commissioning_status(nominal_gain=1))
+        for commissioning in malformed:
+            with self.subTest(commissioning=commissioning):
+                sample = Snapshot.from_status(status(valid_flags=0xE7,
+                    commissioning=commissioning), 10)
+                self.assertEqual(sample.schema, 2)
+                self.assertTrue(sample.outputs_locked_off)
+                self.assertEqual(sample.plate_c, (25, None, 27))
+                self.assertIs(sample.commissioning["valid"], False)
+                self.assertFalse(sample.commissioning_running)
 
     def test_reported_mode_and_actual_duty_are_distinct(self):
         sample = Snapshot.from_status(status(mode=1, target_c=None, desired_duty=[1, 1, 1]), 0)

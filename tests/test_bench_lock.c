@@ -13,6 +13,22 @@ static int board_application_main(void);
 static unsigned force_off_calls;
 static bool expected_lock_at_force_off;
 
+/* The separate commissioning engine is exercised in test_commissioning.
+ * Keep this application's lock-command test isolated from its ADC backend. */
+uint32_t board_millis(void) { return 1000U; }
+void commissioning_init(void) {}
+void commissioning_stop(uint32_t reason, uint32_t now) { (void)reason; (void)now; }
+bool commissioning_active(void) { return false; }
+bool commissioning_owns_adc(void) { return false; }
+void commissioning_snapshot(commission_telemetry_t *dest, uint32_t now)
+{ memset(dest, 0, sizeof(*dest)); dest->uptime_ms = now; }
+control_result_t commissioning_prepare(const tec_inputs_t *in, const tec_controller_t *ctrl,
+                                       bool locked, int32_t value, uint32_t now)
+{ (void)in; (void)ctrl; (void)locked; (void)value; (void)now; return CONTROL_INTERLOCK; }
+control_result_t commissioning_start(const tec_inputs_t *in, const tec_controller_t *ctrl,
+                                     bool locked, int32_t value, uint32_t now)
+{ (void)in; (void)ctrl; (void)locked; (void)value; (void)now; return CONTROL_INTERLOCK; }
+
 void board_outputs_force_off(void)
 {
     ++force_off_calls;

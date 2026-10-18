@@ -49,9 +49,30 @@ static void test_bench_lock_values_and_replay(void)
     }
 }
 
+static void test_commissioning_values(void)
+{
+    const int32_t candidates[] = {-1, 0, 1, 2, 3, 4, 14999, 15000, 15001, INT32_MAX};
+    for (unsigned opcode = CONTROL_COMMISSION_PREPARE; opcode <= CONTROL_COMMISSION_TEST; ++opcode) {
+        control_protocol_t protocol;
+        fake_application_t app = {0};
+        control_protocol_init(&protocol);
+        for (size_t i = 0U; i < sizeof(candidates) / sizeof(candidates[0]); ++i) {
+            const bool allowed = opcode == CONTROL_COMMISSION_PREPARE ? candidates[i] == 15000 :
+                                 candidates[i] >= 0 && candidates[i] <= 3;
+            control_mailbox_t request = packet((uint32_t)i + 1U, opcode, candidates[i]);
+            const unsigned before = app.calls;
+            assert(control_protocol_poll(&protocol, &request, apply, &app, 100U));
+            assert(protocol.result == (allowed ? CONTROL_OK : CONTROL_BAD_VALUE));
+            assert(app.calls == before + (allowed ? 1U : 0U));
+            assert(!control_protocol_poll(&protocol, &request, apply, &app, 101U));
+        }
+    }
+}
+
 int main(void)
 {
     test_bench_lock_values_and_replay();
+    test_commissioning_values();
     control_protocol_t protocol;
     fake_application_t app = {0};
     control_mailbox_t request = packet(1U, CONTROL_SET_MODE, 1);

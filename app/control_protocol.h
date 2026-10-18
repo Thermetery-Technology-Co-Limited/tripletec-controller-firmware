@@ -13,7 +13,9 @@ typedef enum {
     CONTROL_SET_MARGIN = 3U,
     CONTROL_ARM = 4U,
     CONTROL_HEARTBEAT = 5U,
-    CONTROL_SET_BENCH_LOCK = 6U
+    CONTROL_SET_BENCH_LOCK = 6U,
+    CONTROL_COMMISSION_PREPARE = 7U,
+    CONTROL_COMMISSION_TEST = 8U
 } control_opcode_t;
 
 typedef enum {

@@ -69,4 +69,17 @@ typedef struct {
 _Static_assert(sizeof(limit_configuration_telemetry_t) == 32U, "limit configuration layout changed");
 extern volatile limit_configuration_telemetry_t g_limit_configuration;
 
+/* SWD commissioning extension. Normal USB/status layouts stay unchanged. */
+typedef struct {
+    uint32_t magic, seq, schema, uptime_ms;
+    uint32_t state, flags, trip_ma, baseline_adc;
+    uint32_t peak_adc, last_adc, sample_count, pulses;
+    uint32_t fault_code, duration_ms, on_us, period_ms;
+    uint32_t elapsed_ms;
+    int32_t min_plate_mc;
+    uint32_t trip_adc, trip_timer_us;
+} commission_telemetry_t;
+_Static_assert(sizeof(commission_telemetry_t) == 80U, "commission telemetry layout changed");
+extern volatile commission_telemetry_t g_commissioning;
+
 #endif

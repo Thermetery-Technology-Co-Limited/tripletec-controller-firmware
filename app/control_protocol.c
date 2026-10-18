@@ -63,6 +63,10 @@ static control_result_t validate(const control_mailbox_t *request)
         return request->arg0 >= 500 && request->arg0 <= 20000 ? CONTROL_OK : CONTROL_BAD_VALUE;
     case CONTROL_ARM:
         return request->arg0 >= 1 && request->arg0 <= 7 ? CONTROL_OK : CONTROL_BAD_VALUE;
+    case CONTROL_COMMISSION_PREPARE:
+        return request->arg0 == 15000 ? CONTROL_OK : CONTROL_BAD_VALUE;
+    case CONTROL_COMMISSION_TEST:
+        return request->arg0 >= 0 && request->arg0 <= 3 ? CONTROL_OK : CONTROL_BAD_VALUE;
     default:
         return CONTROL_BAD_OPCODE;
     }

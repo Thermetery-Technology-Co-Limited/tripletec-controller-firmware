@@ -24,7 +24,8 @@ SOURCES = {"Auto (USB first)": "auto", "STM32 USB-C": "usb", "Pico SWD": "swd"}
 
 
 def tec1_test_block_reason(sample, *, connected, transport, now,
-                           command_pending=False, last_error=None, demo=False):
+                           command_pending=False, last_error=None, demo=False,
+                           commissioning_action=False):
     """Gate the separate pulse action without changing normal ARM interlocks."""
     if demo or not connected or transport != "swd":
         return "Connect through Pico SWD to test TEC1."
@@ -32,6 +33,10 @@ def tec1_test_block_reason(sample, *, connected, transport, now,
         return "Wait for the current request before testing TEC1."
     if last_error or sample is None or sample.stale(now):
         return "Fresh controller readings are required before testing TEC1."
+    if sample.commissioning_running:
+        return "Stop or finish the TEC1 commissioning test before a separate pulse."
+    if not commissioning_action and sample.valid_flags is not None and sample.valid_flags & 0x80:
+        return "Use the current-protected commissioning tests below."
     if (sample.schema != 2 or sample.outputs_locked_off is not True or
             sample.armed_mask != 0 or any(value != 0 for value in sample.applied_duty) or
             any(value != 0 for value in sample.desired_duty)):
@@ -48,6 +53,61 @@ def tec1_test_block_reason(sample, *, connected, transport, now,
     if sample.plate_c[0] <= sample.target_c + 1.0:
         return "Probe 1 must be more than 1 °C above the target before testing TEC1."
     return None
+
+
+def commissioning_block_reason(sample, action, *, connected, transport, now,
+                               command_pending=False, last_error=None, demo=False):
+    if action not in ("prepare", "verify", "run", "observe"):
+        return "Unsupported commissioning action."
+    reason = tec1_test_block_reason(
+        sample, connected=connected, transport=transport, now=now,
+        command_pending=command_pending, last_error=last_error, demo=demo,
+        commissioning_action=True)
+    if reason:
+        return reason
+    if sample.valid_flags is None or not sample.valid_flags & 0x80:
+        return "Load firmware with guarded TEC1 commissioning support."
+    commissioning = sample.commissioning
+    if not commissioning or commissioning.get("valid") is not True:
+        return "Fresh commissioning status is required."
+    if sample.mode != 0 or sample.margin_c is None or sample.margin_c < 3:
+        return "Use regulated mode with a dew-point margin of at least 3 °C."
+    if action != "prepare" and not (commissioning.get("zero_valid") and
+                                    commissioning.get("selftest_passed")):
+        return "Prepare TEC1 and zero current before the shutdown test."
+    if action in ("run", "observe") and not commissioning.get("trip_verified"):
+        return "Verify the 5 A shutdown path before the guarded 15 A run."
+    return None
+
+
+def commissioning_result_text(commissioning):
+    if not commissioning or commissioning.get("valid") is not True:
+        return "TEC1 commissioning status is unavailable."
+    states = {0: "Not prepared", 1: "Prepared; outputs OFF", 2: "Verifying shutdown",
+              3: "Shutdown verified; outputs OFF", 4: "Guarded run active",
+              5: "Run complete; outputs OFF", 6: "Stopped with a fault"}
+    state = commissioning.get("state")
+    text = states.get(state, "Unknown state")
+    if commissioning.get("zero_valid"):
+        text += f" · zero ADC {commissioning.get('baseline_adc', '—')}"
+    if commissioning.get("sample_count", 0) and commissioning.get("zero_valid"):
+        peak = (commissioning["peak_adc"] - commissioning["baseline_adc"]) * 3.3 / 4095 / 0.0264
+        text += f" · peak {peak:.2f} A nominal"
+    if commissioning.get("pulses"):
+        text += f" · {commissioning['pulses']} pulse(s)"
+    if commissioning.get("duration_ms") in (1000, 10000) and state in (4, 5, 6):
+        text += f" · {commissioning['duration_ms'] / 1000:g} s maximum"
+    if state == 6:
+        faults = {1: "preflight", 2: "zero current", 3: "power-stage self-test",
+                  4: "overcurrent", 5: "plate temperature", 6: "stale sensor",
+                  7: "host communication", 8: "operator STOP", 9: "timeout"}
+        text += " · " + faults.get(commissioning.get("fault_code"), "unknown fault")
+    return text + ". Gain is nominal; full current calibration remains incomplete."
+
+
+def poll_interval_ms(sample):
+    """Active commissioning polls renew its short host-communication lease."""
+    return 200 if sample is not None and sample.commissioning_running else 1000
 
 
 def tec1_test_result_text(result):
@@ -150,6 +210,8 @@ class LinkWorker(threading.Thread):
                         with self.lock:
                             if generation != self.generation:
                                 break
+                        if name in ("commission_prepare", "commission_test") and self.transport != "swd":
+                            raise RuntimeError("TEC1 commissioning requires the selected Pico SWD link.")
                         result = self.link.command(name, value)
                     if result is None:
                         continue
@@ -210,6 +272,9 @@ class Dashboard:
         self.note = tk.StringVar()
         self.bench_lock_state = tk.StringVar(value="BENCH LOCK  —")
         self.tec1_test_result = tk.StringVar(value="TEC1 pulse test has not been run.")
+        self.commission_result = tk.StringVar(value="TEC1 commissioning status is unavailable.")
+        self.commission_reason = tk.StringVar(value="Connect through Pico SWD to commission TEC1.")
+        self._tick_after_id = None
         self.metric_values = []
         self.channel_values = []
         self.current_trip_values = []
@@ -217,7 +282,7 @@ class Dashboard:
         self._layout()
         self._render()
         self.root.after(100, self._drain)
-        self.root.after(1000, self._tick)
+        self._tick_after_id = self.root.after(1000, self._tick)
         if demo:
             self._demo_update()
         elif connect:
@@ -334,7 +399,7 @@ class Dashboard:
                     self.current_trip_values.append(trip)
                 values.append(value)
             self.channel_values.append((status, values))
-        self._label(channels, "* Nominal current · uncalibrated; — means unavailable. Separate pulse results appear below.",
+        self._label(channels, "* Nominal current · uncalibrated; — means unavailable. Applied shows normal control; commissioning results are below.",
                     size=9, color="muted").grid(row=4, column=0, columnspan=5, sticky="w", padx=16, pady=(6, 0))
         self._label(channels, "Software current trip; peak current requires hardware limiting.",
                     size=9, color="amber").grid(row=5, column=0, columnspan=5, sticky="w", padx=16, pady=(0, 10))
@@ -347,6 +412,28 @@ class Dashboard:
         self.tec1_test_result_label = self._label(channels, variable=self.tec1_test_result,
                                                  size=9, color="muted", wraplength=1000)
         self.tec1_test_result_label.grid(row=7, column=0, columnspan=5, sticky="w", padx=16, pady=(0, 12))
+        commission = tk.Frame(channels, bg=COLORS["panel"])
+        commission.grid(row=8, column=0, columnspan=5, sticky="ew", padx=16, pady=(2, 12))
+        self._label(commission, "TEC1 COMMISSIONING · 15 A provisional trip", size=10,
+                    color="accent", bold=True).pack(anchor="w")
+        self._label(commission, "15 A provisional shutdown trip, not constant-current regulation. Observation: 1 ms pulses every 5 ms (20% duty), 10 s maximum. Each action requires your click; gain remains nominal.",
+                    size=9, color="amber", wraplength=1000).pack(anchor="w", pady=(3, 6))
+        self.commission_buttons = {}
+        for action, title in (("prepare", "Prepare TEC1 / zero current"),
+                              ("verify", "Verify shutdown (5 A, 1 ms)"),
+                              ("run", "Run TEC1 (15 A trip, 1 s max)"),
+                              ("observe", "Observe cooling (20%, 10 s max)")):
+            button = self._button(commission, title, lambda value=action: self.commission_tec1(value))
+            button.pack(anchor="w", pady=2)
+            self.commission_buttons[action] = button
+        self.commission_stop_button = self._button(commission, "STOP ALL", self.stop, danger=True)
+        self.commission_stop_button.pack(anchor="w", pady=(5, 2))
+        self.commission_result_label = self._label(commission, variable=self.commission_result,
+                                                  size=9, color="muted", wraplength=1000)
+        self.commission_result_label.pack(anchor="w", pady=(6, 2))
+        self.commission_reason_label = self._label(commission, variable=self.commission_reason,
+                                                  size=9, color="amber", wraplength=1000)
+        self.commission_reason_label.pack(anchor="w")
 
         bottom = tk.Frame(shell, bg=COLORS["bg"])
         bottom.grid(row=4, column=0, sticky="ew")
@@ -415,6 +502,8 @@ class Dashboard:
         self.bench_lock_note.configure(wraplength=width)
         self.footer.configure(wraplength=max(500, event.width - 10))
         self.tec1_test_result_label.configure(wraplength=max(500, event.width - 40))
+        self.commission_result_label.configure(wraplength=max(500, event.width - 40))
+        self.commission_reason_label.configure(wraplength=max(500, event.width - 40))
 
     def _is_demo(self):
         return self.source.get() == "Demo (simulated)"
@@ -437,6 +526,7 @@ class Dashboard:
         self.demo_armed = False
         self.active_transport = None
         self.tec1_test_result.set("TEC1 pulse test has not been run on this connection.")
+        self.commission_result.set("TEC1 commissioning status is unavailable.")
         if self._is_demo():
             self.demo_started = time.monotonic()
             self._demo_update()
@@ -607,9 +697,29 @@ class Dashboard:
         self.message.set("Running one TEC1 pulse through Pico SWD. Other requests wait for the result.")
         self._render_controls()
 
+    def commission_tec1(self, action):
+        reason = commissioning_block_reason(
+            self.snapshot, action, connected=self.connected, transport=self.active_transport,
+            now=time.monotonic(), command_pending=self.command_pending,
+            last_error=self.last_error, demo=self._is_demo())
+        if reason:
+            self.commission_reason.set(reason)
+            return
+        command = {"prepare": ("commission_prepare", 15000),
+                   "verify": ("commission_test", 1), "run": ("commission_test", 2),
+                   "observe": ("commission_test", 3)}[action]
+        self.commission_result.set("TEC1 request sent. Waiting for firmware acknowledgement; no automatic next step.")
+        self._command([command])
+
     def _accept_status(self, data):
         now = time.monotonic()
+        was_running = bool(self.snapshot and self.snapshot.commissioning_running)
         self.snapshot = Snapshot.from_status(data, now)
+        if self.snapshot.commissioning_running and not was_running:
+            scheduled = getattr(self, "_tick_after_id", None)
+            if scheduled is not None:
+                self.root.after_cancel(scheduled)
+            self._tick_after_id = self.root.after(200, self._tick)
         self.last_error = None
         self.active_transport = data.get("transport", self.active_transport)
         self.connected = not self._is_demo()
@@ -670,6 +780,7 @@ class Dashboard:
         self.root.after(100, self._drain)
 
     def _tick(self):
+        self._tick_after_id = None
         if self.closed:
             return
         if self._is_demo():
@@ -678,7 +789,7 @@ class Dashboard:
             self.poll_pending = True
             self.worker.submit(self.generation, "poll")
         self._render()
-        self.root.after(1000, self._tick)
+        self._tick_after_id = self.root.after(poll_interval_ms(self.snapshot), self._tick)
 
     def _demo_update(self):
         elapsed = time.monotonic() - self.demo_started
@@ -715,6 +826,8 @@ class Dashboard:
             self.connection_label.configure(fg=COLORS["accent"])
             link_name = "STM32 USB-C" if self.active_transport == "usb" else "Pico SWD"
             self.detail_text.set(f"{link_name} · " + ("Normal control locked OFF · separate TEC1 pulse test" if sample.outputs_locked_off else "Firmware interlocks active"))
+            if sample.commissioning_running:
+                self.detail_text.set(f"{link_name} · TEC1 commissioning active · STOP ALL cancels")
         else:
             self.connection_text.set("●  READ ERROR" if self.connected and self.last_error else ("●  STALE" if self.connected else "●  DISCONNECTED"))
             self.connection_label.configure(fg=COLORS["amber"] if self.connected else COLORS["muted"])
@@ -765,6 +878,8 @@ class Dashboard:
         self.reason.set(reason or ("Demo controls affect simulated values only." if demo else "Ready. Start requests all three channels; firmware checks every interlock."))
         self.start_button.configure(state="normal" if available and not reason else "disabled")
         self.stop_button.configure(state="normal" if (self.connected or demo) and sample and sample.schema >= 2 else "disabled")
+        self.commission_stop_button.configure(
+            state="normal" if self.connected and sample and sample.schema >= 2 else "disabled")
         lock_reason = (sample.bench_lock_block_reason(
             self.connected, now, command_pending=self.command_pending,
             last_error=self.last_error) if sample else "No controller status")
@@ -786,6 +901,16 @@ class Dashboard:
             sample, connected=self.connected, transport=self.active_transport, now=now,
             command_pending=self.command_pending, last_error=self.last_error, demo=demo)
         self.test_tec1_button.configure(state="normal" if pulse_reason is None else "disabled")
+        for action, button in self.commission_buttons.items():
+            blocked = commissioning_block_reason(
+                sample, action, connected=self.connected, transport=self.active_transport, now=now,
+                command_pending=self.command_pending, last_error=self.last_error, demo=demo)
+            button.configure(state="normal" if blocked is None else "disabled")
+        self.commission_result.set(commissioning_result_text(sample.commissioning if sample else None))
+        commission_reason = commissioning_block_reason(
+            sample, "prepare", connected=self.connected, transport=self.active_transport, now=now,
+            command_pending=self.command_pending, last_error=self.last_error, demo=demo)
+        self.commission_reason.set(commission_reason or "Each action requires your click. Preparation leaves outputs OFF; verification and run energize TEC1 briefly.")
         unregulated = self.mode.get() == 1 or (sample is not None and sample.mode == 1)
         self.note.set("Bypasses dew-point protection; condensation may occur. Sensor and current trips remain active. Margin is ignored." if unregulated else "Regulated target = max(0 °C, dew point + margin). Applying settings never starts outputs.")
         self.note_label.configure(fg=COLORS["amber"] if unregulated else COLORS["muted"])

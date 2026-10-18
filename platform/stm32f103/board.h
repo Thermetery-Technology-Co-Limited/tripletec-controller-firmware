@@ -5,10 +5,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* Bench image: PA1/PA2/PA3 stay GPIO LOW; TIM2 never drives the TECs. */
+/* Normal control remains inhibited. A separate supervised commissioning
+ * stage may emit bounded, current-monitored pulses on PA1 only. */
 #define BOARD_CORE_CLOCK_HZ 72000000u /* HSE 12 MHz x6 when USB clock is ready */
 #define BOARD_UART_BAUD 115200u
-#define BOARD_TEC_OUTPUTS_LOCKED_OFF 1
+#define BOARD_NORMAL_OUTPUTS_LOCKED_OFF 1
 
 /* Called by Reset_Handler before C runtime initialization; no global data used. */
 void board_early_safe_init(void);

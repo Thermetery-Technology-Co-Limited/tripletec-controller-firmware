@@ -70,6 +70,7 @@ class Snapshot:
     current_limits_a: tuple
     current_limits_commissioned_mask: int | None
     bench_lock_supported: bool | None
+    commissioning: dict | None
 
     @classmethod
     def from_status(cls, data: dict, received_at: float) -> "Snapshot":
@@ -108,6 +109,16 @@ class Snapshot:
         if capability is not None and not isinstance(capability, bool):
             raise ValueError("Unsupported bench-lock capability; controls remain disabled")
         valid_flags = _integer(data.get("valid_flags"))
+        commissioning = data.get("commissioning")
+        if commissioning is not None:
+            if not isinstance(commissioning, dict):
+                commissioning = {"valid": False, "error": "Unsupported commissioning status"}
+            elif commissioning.get("valid") is True and (
+                    _integer(commissioning.get("state"), 0, 6) is None or
+                    _integer(commissioning.get("flags"), 0, 63) is None or
+                    any(type(commissioning.get(name)) is not bool for name in
+                        ("zero_valid", "trip_verified", "selftest_passed", "nominal_gain"))):
+                commissioning = {"valid": False, "error": "Unsupported commissioning fields"}
         if schema < 2:
             capability = False
         elif valid_flags is not None:
@@ -122,7 +133,7 @@ class Snapshot:
             _integer(data.get("armed_mask"), 0, 7) if schema == 2 else None,
             _integer(data.get("uptime_ms")), _integer(data.get("sht31_errors")),
             _integer(data.get("ads1220_errors")), valid_flags,
-            limits, commissioned, capability,
+            limits, commissioned, capability, commissioning,
         )
 
     def stale(self, now: float) -> bool:
@@ -140,11 +151,18 @@ class Snapshot:
             return "This firmware does not report support for changing the bench lock."
         if self.outputs_locked_off is None:
             return "The controller's bench-lock state is unavailable."
+        if self.outputs_locked_off and self.commissioning_running:
+            return "Stop the TEC1 commissioning test before unlocking the bench lock."
         if command_pending:
             return "Wait for firmware acknowledgement before changing the bench lock."
         if last_error and self.outputs_locked_off:
             return "Restore communication before unlocking the bench lock."
         return None
+
+    @property
+    def commissioning_running(self) -> bool:
+        return bool(self.commissioning and self.commissioning.get("valid") is True and
+                    self.commissioning.get("state") in (2, 4))
 
     def start_block_reason(self, connected: bool, now: float) -> str | None:
         if not connected:

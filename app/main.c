@@ -17,6 +17,7 @@
 #endif
 
 volatile bench_telemetry_t g_telemetry;
+volatile adc_diagnostics_telemetry_t g_adc_diagnostics;
 volatile control_mailbox_t g_command_mailbox = {
     .magic = CONTROL_MAILBOX_MAGIC, .version = CONTROL_PROTOCOL_VERSION
 };
@@ -32,6 +33,11 @@ static int32_t ntc_codes[3];
 static uint16_t current_codes[3];
 static float current_amperes[3];
 static bool current_valid;
+static board_adc_diagnostics_t adc_diagnostics;
+static bool adc_acquired;
+static bool adc_reference_plausible;
+static int32_t estimated_vdda_mv = INT32_MIN;
+static uint32_t adc_errors;
 static uint32_t sht_errors;
 static uint32_t ads_errors;
 static uint32_t loop_count;
@@ -75,6 +81,7 @@ static int32_t milli(float value)
 static void publish(uint32_t now)
 {
     bench_telemetry_t next = {0};
+    adc_diagnostics_telemetry_t diagnostic = {0};
     const uint32_t sequence = g_telemetry.seq;
     next.magic = UINT32_C(0x54454331);
     next.seq = sequence + 1U;
@@ -118,11 +125,22 @@ static void publish(uint32_t now)
     next.margin_mc = milli(controller.config.dewpoint_margin_c);
     next.command_ack_seq = command_protocol.ack_seq;
     next.command_result = (uint32_t)command_protocol.result;
+    diagnostic.magic = UINT32_C(0x54454344);
+    diagnostic.seq = sequence + 1U;
+    diagnostic.schema = 1U;
+    diagnostic.uptime_ms = now;
+    diagnostic.vrefint_adc_raw = adc_diagnostics.vrefint_raw;
+    diagnostic.estimated_vdda_mv = estimated_vdda_mv;
+    diagnostic.flags = (adc_acquired ? 1U : 0U) | (adc_reference_plausible ? 2U : 0U);
+    diagnostic.adc_errors = adc_errors;
     g_telemetry.seq = sequence + 1U;
+    g_adc_diagnostics.seq = sequence + 1U;
     __asm volatile("dmb" ::: "memory");
     g_telemetry = next;
+    g_adc_diagnostics = diagnostic;
     __asm volatile("dmb" ::: "memory");
     g_telemetry.seq = sequence + 2U;
+    g_adc_diagnostics.seq = sequence + 2U;
 }
 
 static void disarm_all(void)
@@ -288,9 +306,18 @@ int main(void)
         now = board_millis();
         if (now - last_current >= 250U) {
             last_current = now;
-            const bool adc_valid = board_current_read_raw(current_codes, 25U);
+            adc_acquired = board_adc_read_diagnostics(&adc_diagnostics, 25U);
+            estimated_vdda_mv = adc_acquired && adc_diagnostics.vrefint_raw != 0U ?
+                (int32_t)((UINT32_C(1200) * 4095U) / adc_diagnostics.vrefint_raw) : INT32_MIN;
+            adc_reference_plausible = adc_acquired && estimated_vdda_mv >= 2800 &&
+                                      estimated_vdda_mv <= 3600;
+            const bool adc_valid = adc_acquired && adc_reference_plausible;
+            if (!adc_valid) {
+                ++adc_errors;
+            }
             current_valid = adc_valid;
             for (size_t i = 0U; i < 3U; ++i) {
+                current_codes[i] = adc_acquired ? adc_diagnostics.current_raw[i] : 0U;
                 current_result_t current;
                 if (adc_valid && current_from_adc12(current_codes[i], 3.3f,
                                                          &current_config[i], &current)) {

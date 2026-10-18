@@ -32,7 +32,7 @@ class PresentationTests(unittest.TestCase):
         self.assertIn("Bench firmware", sample.start_block_reason(True, 11.0))
         self.assertIn("stale", sample.start_block_reason(True, 14.0))
         self.assertIn("Connect", sample.start_block_reason(False, 11.0))
-        self.assertIn("sensor missing", channel_status(sample, 1, True, 11.0))
+        self.assertIn("plate sensor unavailable", channel_status(sample, 1, True, 11.0))
         self.assertEqual(channel_status(sample, 0, True, 14.0), "Stale reading")
 
     def test_reported_mode_and_actual_duty_are_distinct(self):
@@ -41,6 +41,29 @@ class PresentationTests(unittest.TestCase):
         self.assertIsNone(sample.target_c)
         self.assertEqual(sample.applied_duty, (0, 0, 0))
         self.assertEqual(sample.desired_duty, (1, 1, 1))
+
+    def test_invalid_current_is_unavailable_even_with_numeric_conversion(self):
+        sample = Snapshot.from_status(status(current_a_nominal=[-61.951, -1.213, -1.192],
+                                             active_faults=[6706] * 3,
+                                             plate_c=[None] * 3), 0)
+        self.assertEqual(sample.current_a, (None, None, None))
+        for index in range(3):
+            text = channel_status(sample, index, True, 0)
+            self.assertIn("Bench locked", text)
+            self.assertIn("plate sensor unavailable", text)
+            self.assertIn("current sensor unavailable", text)
+            self.assertNotIn("hardware gate", text)
+            self.assertNotIn("unverified", text)
+            self.assertNotIn("limits", text)
+        self.assertIn("Bench firmware", sample.start_block_reason(True, 0))
+
+    def test_valid_negative_current_is_retained_and_bench_stale_is_visible(self):
+        sample = Snapshot.from_status(status(current_a_nominal=[-0.02, 0, 0],
+                                             active_faults=[2, 2 | 1024, 2 | 32]), 0)
+        self.assertEqual(sample.current_a, (-0.02, 0, 0))
+        self.assertEqual(channel_status(sample, 0, True, 0), "Bench locked · OFF")
+        self.assertIn("current reading stale", channel_status(sample, 1, True, 0))
+        self.assertIn("plate reading stale", channel_status(sample, 2, True, 0))
 
     def test_unsupported_protocol_and_fields_rejected(self):
         for data in (status(schema=3), status(mode=2), status(mode=True),

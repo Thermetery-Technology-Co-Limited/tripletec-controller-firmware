@@ -25,6 +25,18 @@ Launch `build/gui/TripleTEC-Control.exe`. OpenOCD must be installed and availabl
 
 Use one host process per Pico probe. Close the GUI before flashing or running the diagnostic CLI. `python scripts/check_gui_link.py` performs an output-locked command check and restores regulated mode with a 3°C margin. Test evidence is recorded in [VALIDATION_GUI.md](VALIDATION_GUI.md).
 
+### Powered board, TECs disconnected
+
+Version 0.2.1 adds an independent internal-reference ADC check and a read-only no-load report:
+
+```powershell
+python -m scripts.check_no_load --serial E66598541B21AE38 --output validation/powered-no-load.json
+```
+
+It collects 12 snapshots, checks telemetry progress, output lock/zero duty, sensor errors, thermistor presence and nominal zero-current baselines. Exit 1 means checks remain; exit 2 means incomplete acquisition. It never changes settings, sends a heartbeat, resets the MCU or enables outputs. Missing thermistors are expected at this assembly stage and are reported as unresolved checks.
+
+The current board has healthy internal-reference readings, but all three external current-sense inputs remain near ground. These are rejected inputs, not zero-current calibration values. The GUI shows unavailable current readings and the missing sensor details. See [VALIDATION_NO_LOAD.md](VALIDATION_NO_LOAD.md) for evidence and the next physical measurements.
+
 ## Build and test
 
 Python 3 and `arm-none-eabi-gcc` are required. Native C tests also require a host GCC, such as MinGW-w64 on Windows. Put the compilers on PATH or provide their paths with `--cc` and `--arm-cc`.
@@ -82,6 +94,8 @@ UART prints status every second and accepts `status` and `help`. Missing values 
 The MCU USB schematic has no explicit 1.5kΩ D+ pullup, so direct USB CDC is not included in this image.
 
 Telemetry `valid_flags`: bit 0 fresh ambient sample; bit 1 verified ADS configuration; bits 2/3/4 fresh plate temperatures; bit 5 valid current ADC acquisition. These indicate acquisition validity, not calibration or permission to cool. `active_faults=2` is the intentional hardware gate in the bench image; other bits are defined in `core/controller.h`. Applied duty is always zero.
+
+An optional, independently sequenced 32-byte ADC diagnostic block reports ADC1 channel 17 VREFINT, acquisition errors and an estimated VDDA using nominal 1.20V. Its symbol is included in the generated metadata; the main telemetry remains schema 2. The estimate is not a calibrated supply measurement and does not sense the external 12V rail. A failed or implausible internal-reference acquisition invalidates current readings. Main telemetry and this diagnostic block may come from adjacent publications; each includes its own sequence and uptime.
 
 ## Limits before powered operation
 

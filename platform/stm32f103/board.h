@@ -38,6 +38,21 @@ bool board_button_pressed(void);    /* PB0, active LOW */
 /* Uncalibrated current-monitor voltages: PC0/PC1/PC2, ADC1 channels 10/11/12. */
 bool board_current_read_raw(uint16_t samples[3], uint32_t timeout_ms);
 
+typedef struct {
+    uint16_t current_raw[3];
+    uint16_t vrefint_raw;
+} board_adc_diagnostics_t;
+
+/* Same current inputs plus ADC1_IN17 (internal nominal 1.20 V reference).
+ * VREFINT is a diagnostic of ADC/reference operation, not a calibrated supply
+ * measurement or a measurement of the external 12 V rail. The F103 reference
+ * tolerance applies; no per-device factory VREFINT calibration is assumed.
+ * All four conversions share the bounded timeout. On failure *samples is zero
+ * and must not be treated as a valid zero-current measurement. No output pins
+ * are enabled by this function. Calls must be serialized with current reads.
+ */
+bool board_adc_read_diagnostics(board_adc_diagnostics_t *samples, uint32_t timeout_ms);
+
 /* Approx. 4 s at nominal 40 kHz LSI; actual LSI tolerance changes the period. */
 void board_watchdog_start(void);
 void board_watchdog_feed(void);

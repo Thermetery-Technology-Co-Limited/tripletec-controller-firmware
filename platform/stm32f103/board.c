@@ -226,11 +226,19 @@ void board_init(void)
     i2c_configure();
 
     ADC1_CR1 = 0u;
-    ADC1_SMPR1 = 7u | (7u << 3) | (7u << 6); /* 239.5 cycle acquisition. */
+    /* Channels 10/11/12 and internal channel 17: 239.5 cycles at 4 MHz,
+     * or 59.875 us. ST F103xC/D/E datasheet Table 13 requires up to 17.1 us
+     * when sampling VREFINT. RM0008 maps that reference to ADC1_IN17.
+     */
+    ADC1_SMPR1 = 7u | (7u << 3) | (7u << 6) | (7u << 21);
     ADC1_SQR1 = 0u;
     ADC1_SQR2 = 0u;
     ADC1_SQR3 = 10u;
-    ADC1_CR2 = BIT(0) | (7u << 17) | BIT(20);
+    ADC1_CR2 = BIT(0) | (7u << 17) | BIT(20) | BIT(23);
+    /* TSVREFE enables both internal reference/temperature paths. Allow 1 ms
+     * before calibration/conversion, also exceeding the 10 us internal sensor
+     * startup maximum. board_delay_ms retains a finite poll fallback.
+     */
     board_delay_ms(1u);
     ADC1_CR2 |= BIT(3); /* Reset calibration. */
     deadline = deadline_begin(20u);
@@ -505,20 +513,64 @@ bool board_button_pressed(void)
     return (GPIOB_IDR & BIT(0)) == 0u;
 }
 
+static bool adc_read_channel(uint32_t channel, uint16_t *sample, deadline_t *deadline)
+{
+    /* Discard any completed conversion left by an earlier timed-out call.
+     * A regular single conversion then owns EOC and DR until it is consumed.
+     */
+    (void)ADC1_DR;
+    ADC1_SR = 0u;
+    ADC1_SQR3 = channel;
+    ADC1_CR2 |= BIT(22);
+    if (!wait_bits(&ADC1_SR, BIT(1), true, deadline)) {
+        /* Do not relabel a late conversion as another channel on the next
+         * call. Initialization after reset is required following a timeout.
+         */
+        adc_ready = false;
+        return false;
+    }
+    *sample = (uint16_t)(ADC1_DR & UINT32_C(0x0fff));
+    return true;
+}
+
 bool board_current_read_raw(uint16_t samples[3], uint32_t timeout_ms)
 {
     deadline_t deadline = deadline_begin(timeout_ms);
+    uint16_t result[3];
     if (!adc_ready || samples == NULL) {
         return false;
     }
     for (uint32_t i = 0u; i < 3u; ++i) {
-        ADC1_SQR3 = 10u + i;
-        ADC1_CR2 |= BIT(22);
-        if (!wait_bits(&ADC1_SR, BIT(1), true, &deadline)) {
+        if (!adc_read_channel(10u + i, &result[i], &deadline)) {
             return false;
         }
-        samples[i] = (uint16_t)ADC1_DR;
     }
+    for (uint32_t i = 0u; i < 3u; ++i) {
+        samples[i] = result[i];
+    }
+    return true;
+}
+
+bool board_adc_read_diagnostics(board_adc_diagnostics_t *samples, uint32_t timeout_ms)
+{
+    deadline_t deadline = deadline_begin(timeout_ms);
+    board_adc_diagnostics_t result = {0};
+    if (samples == NULL) {
+        return false;
+    }
+    *samples = result;
+    if (!adc_ready) {
+        return false;
+    }
+    for (uint32_t i = 0u; i < 3u; ++i) {
+        if (!adc_read_channel(10u + i, &result.current_raw[i], &deadline)) {
+            return false;
+        }
+    }
+    if (!adc_read_channel(17u, &result.vrefint_raw, &deadline)) {
+        return false;
+    }
+    *samples = result;
     return true;
 }
 

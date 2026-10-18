@@ -63,6 +63,25 @@ class StatusTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             status.decode(bytes(127))
 
+    def test_adc_reference_diagnostic_uses_first_consistent_payload(self):
+        first = struct.pack("<8I", 0x54454344, 2, 1, 1000, 1489, 3300, 3, 0)
+        later = struct.pack("<8I", 0x54454344, 2, 1, 1001, 10, 49000, 1, 1)
+        result = status.consistent_adc_diagnostics(first, later)
+        self.assertTrue(result["valid"])
+        self.assertEqual(result["vrefint_adc_raw"], 1489)
+        self.assertEqual(result["estimated_vdda_v"], 3.3)
+        self.assertEqual(result["adc_errors"], 0)
+
+    def test_adc_diagnostics_invalid_acquisition_and_torn_data(self):
+        invalid = struct.pack("<8I", 0x54454344, 4, 1, 1000, 0, 0x80000000, 0, 1)
+        result = status.consistent_adc_diagnostics(invalid, invalid)
+        self.assertFalse(result["valid"])
+        self.assertIsNone(result["estimated_vdda_v"])
+        for other in (bytes(32), invalid[:28],
+                      struct.pack("<8I", 0x54454344, 6, 1, 1000, 0, 0, 0, 0)):
+            with self.subTest(other=other), self.assertRaises(ValueError):
+                status.consistent_adc_diagnostics(invalid, other)
+
 
 if __name__ == "__main__":
     unittest.main()

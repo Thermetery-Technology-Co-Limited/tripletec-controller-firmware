@@ -40,4 +40,20 @@ typedef struct {
 _Static_assert(sizeof(bench_telemetry_t) == 160U, "telemetry schema changed");
 extern volatile bench_telemetry_t g_telemetry;
 
+/* Optional diagnostic block; the command/telemetry schema stays unchanged.
+ * VDDA is an estimate from nominal 1.20 V VREFINT, not a calibration. */
+typedef struct {
+    uint32_t magic;
+    uint32_t seq;
+    uint32_t schema;
+    uint32_t uptime_ms;
+    uint32_t vrefint_adc_raw;
+    int32_t estimated_vdda_mv;
+    uint32_t flags; /* bit 0 acquisition OK; bit 1 estimate in 2.8..3.6 V */
+    uint32_t adc_errors;
+} adc_diagnostics_telemetry_t;
+
+_Static_assert(sizeof(adc_diagnostics_telemetry_t) == 32U, "ADC diagnostic layout changed");
+extern volatile adc_diagnostics_telemetry_t g_adc_diagnostics;
+
 #endif

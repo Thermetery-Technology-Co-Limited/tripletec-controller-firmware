@@ -1,0 +1,57 @@
+{
+  "schema": 2,
+  "sequence": 422888,
+  "uptime_ms": 52860453,
+  "outputs_locked_off": true,
+  "valid_flags": 35,
+  "sht31_errors": 0,
+  "ads1220_errors": 0,
+  "ambient_c": 26.624,
+  "rh_percent": 62.277,
+  "dewpoint_c": 18.812,
+  "target_c": 21.812,
+  "plate_c": [
+    null,
+    null,
+    null
+  ],
+  "ntc_adc_raw": [
+    6757320,
+    6757287,
+    6757282
+  ],
+  "current_adc_raw": [
+    18,
+    12,
+    19
+  ],
+  "current_a_nominal": [
+    -61.951,
+    -1.213,
+    -1.192
+  ],
+  "applied_duty": [
+    0.0,
+    0.0,
+    0.0
+  ],
+  "active_faults": [
+    6706,
+    6706,
+    6706
+  ],
+  "loop_count": 51750237,
+  "button_pressed": false,
+  "mode": 0,
+  "mode_name": "regulated",
+  "margin_c": 3.0,
+  "armed_mask": 0,
+  "desired_duty": [
+    0.0,
+    0.0,
+    0.0
+  ],
+  "command_ack_seq": 8,
+  "command_result": 0,
+  "command_result_name": "OK"
+}

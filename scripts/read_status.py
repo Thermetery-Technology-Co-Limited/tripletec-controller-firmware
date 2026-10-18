@@ -62,6 +62,25 @@ def consistent_snapshot(first: bytes, second: bytes) -> dict:
     return decode(first)
 
 
+def consistent_adc_diagnostics(first: bytes, second: bytes) -> dict:
+    if len(first) != 32 or len(second) != 32 or first[4:8] != second[4:8]:
+        raise ValueError("ADC diagnostic snapshot changed or is incomplete")
+    words = struct.unpack("<8I", first)
+    if words[0] != 0x54454344 or words[2] != 1 or words[1] & 1:
+        raise ValueError("ADC diagnostic identity or sequence is invalid")
+    if words[4] > 4095 or words[6] & ~3:
+        raise ValueError("ADC diagnostic values are invalid")
+    vdda_mv = struct.unpack_from("<i", first, 20)[0]
+    return {
+        "schema": words[2], "sequence": words[1], "uptime_ms": words[3],
+        "valid": words[6] == 3, "acquisition_ok": bool(words[6] & 1),
+        "reference_plausible": bool(words[6] & 2), "vrefint_adc_raw": words[4],
+        "estimated_vdda_v": None if vdda_mv == INVALID else vdda_mv / 1000,
+        "adc_errors": words[7],
+        "reference_basis": "Nominal 1.20 V VREFINT; estimate only, not calibrated",
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--serial", help="Select a specific CMSIS-DAP probe by serial number")

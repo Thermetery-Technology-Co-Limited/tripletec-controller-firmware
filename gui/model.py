@@ -7,6 +7,7 @@ from typing import Any
 
 STALE_SECONDS = 3.0
 MODE_LABELS = {0: "Regulated", 1: "Unregulated (100%)"}
+CURRENT_INVALID = 512
 FAULT_LABELS = (
     (1, "configuration"), (2, "hardware gate"), (4, "ambient sensor"),
     (8, "ambient stale"), (16, "plate sensor"), (32, "plate stale"),
@@ -87,11 +88,16 @@ class Snapshot:
             faults = tuple(_integer(value) for value in raw_faults)
         else:
             raise ValueError("Unsupported fault fields: expected three channels")
+        current = _triple(data, "current_a_nominal")
+        # A nominal conversion is not a measurement when firmware rejects the
+        # sensor input (for example an unpowered current-sense output at a rail).
+        current = tuple(None if fault is not None and fault & CURRENT_INVALID else value
+                        for value, fault in zip(current, faults))
         return cls(
             received_at, schema, _number(data.get("ambient_c")),
             _number(data.get("rh_percent")), _number(data.get("dewpoint_c")),
             _number(data.get("target_c")), _triple(data, "plate_c"),
-            _triple(data, "current_a_nominal"), _triple(data, "applied_duty", duty=True),
+            current, _triple(data, "applied_duty", duty=True),
             _triple(data, "desired_duty", duty=True), faults, locked, mode,
             _number(data.get("margin_c")) if schema == 2 else None,
             _integer(data.get("armed_mask"), 0, 7) if schema == 2 else None,
@@ -145,9 +151,27 @@ def channel_status(snapshot: Snapshot, index: int, connected: bool, now: float) 
         return "Disconnected"
     if snapshot.stale(now):
         return "Stale reading"
-    if snapshot.outputs_locked_off:
-        return "Bench locked · sensor missing" if snapshot.plate_c[index] is None else "Bench locked · OFF"
     fault = snapshot.faults[index]
+    if snapshot.outputs_locked_off:
+        labels = []
+        if snapshot.plate_c[index] is None or (fault is not None and fault & 16):
+            labels.append("plate sensor unavailable")
+        elif fault is not None and fault & 32:
+            labels.append("plate reading stale")
+        if snapshot.current_a[index] is None:
+            labels.append("current sensor unavailable")
+        elif fault is not None and fault & 1024:
+            labels.append("current reading stale")
+        # Hardware verification and current commissioning remain Start inhibits;
+        # avoid repeating those expected bench conditions on every channel.
+        expected_or_shown = 2 | 16 | 32 | CURRENT_INVALID | 1024 | 2048 | 4096
+        if fault is not None:
+            labels.extend(label for bit, label in FAULT_LABELS
+                          if fault & bit and not (expected_or_shown & bit))
+            known = sum(bit for bit, _ in FAULT_LABELS)
+            if fault & ~known:
+                labels.append(f"fault 0x{fault & ~known:X}")
+        return "Bench locked · " + (", ".join(labels) if labels else "OFF")
     if fault:
         labels = [label for bit, label in FAULT_LABELS if fault & bit]
         known = sum(bit for bit, _ in FAULT_LABELS)

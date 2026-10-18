@@ -234,7 +234,7 @@ class Dashboard:
                 value.grid(row=index + 1, column=column, sticky="w", pady=5)
                 values.append(value)
             self.channel_values.append((status, values))
-        self._label(channels, "* Nominal current · calibration required. Applied duty is the actual firmware output.",
+        self._label(channels, "* Nominal current · uncalibrated; — means unavailable. Applied duty is the firmware output.",
                     size=9, color="muted").grid(row=4, column=0, columnspan=5, sticky="w", padx=16, pady=(6, 10))
 
         bottom = tk.Frame(shell, bg=COLORS["bg"])

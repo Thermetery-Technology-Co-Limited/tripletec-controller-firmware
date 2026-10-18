@@ -14,9 +14,9 @@ import time
 import zlib
 
 try:
-    from .read_status import consistent_snapshot
+    from .read_status import consistent_snapshot, consistent_adc_diagnostics
 except ImportError:
-    from read_status import consistent_snapshot
+    from read_status import consistent_snapshot, consistent_adc_diagnostics
 
 ROOT = Path(__file__).resolve().parents[1]
 MAILBOX_MAGIC = 0x54454343
@@ -67,6 +67,10 @@ class DeviceLink:
             if type(size) is not int or size not in (128, 160):
                 raise RuntimeError("Unsupported telemetry size; rebuild firmware")
             _ram_region(metadata["address"], size)
+            if "adc_diagnostics_address" in metadata:
+                if metadata.get("adc_diagnostics_size") != 32:
+                    raise RuntimeError("Unsupported ADC diagnostic size; rebuild firmware")
+                _ram_region(metadata["adc_diagnostics_address"], 32)
             return metadata
         except (OSError, ValueError, KeyError, TypeError) as error:
             raise RuntimeError("Firmware symbol metadata missing or invalid; build firmware first") from error
@@ -110,6 +114,11 @@ class DeviceLink:
             snapshots = [directory / f"status{i}.bin" for i in range(4)]
             commands = [f"dump_image {_tcl_path(path)} {metadata['address']:#x} {metadata['size']}"
                         for path in snapshots]
+            diagnostics = []
+            if "adc_diagnostics_address" in metadata:
+                diagnostics = [directory / f"adc{i}.bin" for i in range(4)]
+                commands.extend(f"dump_image {_tcl_path(path)} {metadata['adc_diagnostics_address']:#x} 32"
+                                for path in diagnostics)
             mailbox_path = directory / "mailbox.bin"
             if mailbox:
                 address = _ram_region(metadata.get("mailbox_address"), MAILBOX_SIZE)
@@ -121,6 +130,17 @@ class DeviceLink:
                 for first, second in zip(snapshots, snapshots[1:]):
                     try:
                         status = consistent_snapshot(first.read_bytes(), second.read_bytes())
+                        if diagnostics:
+                            status["adc_diagnostics"] = {
+                                "valid": False, "error": "No consistent ADC diagnostic snapshot"
+                            }
+                            for earlier, later in zip(diagnostics, diagnostics[1:]):
+                                try:
+                                    status["adc_diagnostics"] = consistent_adc_diagnostics(
+                                        earlier.read_bytes(), later.read_bytes())
+                                    break
+                                except ValueError:
+                                    continue
                         return status, mailbox_path.read_bytes() if mailbox else None
                     except ValueError:
                         continue

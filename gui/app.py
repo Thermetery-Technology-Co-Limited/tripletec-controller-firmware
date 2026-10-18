@@ -23,6 +23,49 @@ COLORS = {"bg": "#0C121B", "panel": "#151E2B", "raised": "#1C2838",
 SOURCES = {"Auto (USB first)": "auto", "STM32 USB-C": "usb", "Pico SWD": "swd"}
 
 
+def tec1_test_block_reason(sample, *, connected, transport, now,
+                           command_pending=False, last_error=None, demo=False):
+    """Gate the separate pulse action without changing normal ARM interlocks."""
+    if demo or not connected or transport != "swd":
+        return "Connect through Pico SWD to test TEC1."
+    if command_pending:
+        return "Wait for the current request before testing TEC1."
+    if last_error or sample is None or sample.stale(now):
+        return "Fresh controller readings are required before testing TEC1."
+    if (sample.schema != 2 or sample.outputs_locked_off is not True or
+            sample.armed_mask != 0 or any(value != 0 for value in sample.applied_duty) or
+            any(value != 0 for value in sample.desired_duty)):
+        return "TEC1 testing requires stopped bench firmware and zero output on every channel."
+    # Hardware verification and current calibration/commissioning are expected
+    # bench inhibits. Every other TEC1 fault still blocks this separate action.
+    expected_bench_faults = 2 | 2048 | 4096
+    if (sample.faults[0] is None or sample.faults[0] & ~expected_bench_faults or
+            sample.valid_flags is None or sample.valid_flags & 0x27 != 0x27 or
+            sample.ambient_c is None or sample.rh_percent is None or
+            sample.dewpoint_c is None or sample.target_c is None or
+            sample.plate_c[0] is None or sample.current_a[0] is None):
+        return "Valid ambient, probe 1 and current readings are required before testing TEC1."
+    if sample.plate_c[0] <= sample.target_c + 1.0:
+        return "Probe 1 must be more than 1 °C above the target before testing TEC1."
+    return None
+
+
+def tec1_test_result_text(result):
+    """Describe the pulse evidence without implying calibrated current protection."""
+    pulse = result.get("pulse_test")
+    if not isinstance(pulse, dict) or not isinstance(pulse.get("timer_complete"), bool):
+        raise ValueError("TEC1 test result is incomplete; no automatic retry was made.")
+    peak = pulse.get("peak_current_a_nominal")
+    elapsed = pulse.get("elapsed_nominal_us")
+    if (isinstance(peak, bool) or not isinstance(peak, (int, float)) or not math.isfinite(peak) or
+            isinstance(elapsed, bool) or not isinstance(elapsed, (int, float)) or
+            not math.isfinite(elapsed) or elapsed < 0):
+        raise ValueError("TEC1 test measurements are unavailable; no automatic retry was made.")
+    state = "timer complete" if pulse["timer_complete"] else "timer completion not confirmed"
+    return (f"TEC1 pulse: {state}; elapsed {elapsed:g} µs nominal; "
+            f"peak {peak:.2f} A nominal, uncalibrated. Current protection remains uncommissioned.")
+
+
 def resource_root() -> Path:
     """Resolve optional bundled assets without depending on the launch folder."""
     return Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1]))
@@ -110,6 +153,12 @@ class LinkWorker(threading.Thread):
                         result = self.link.command(name, value)
                     if result is None:
                         continue
+                elif kind == "tec1_test":
+                    if self.link is None or self.transport != "swd":
+                        raise RuntimeError("TEC1 pulse testing requires a connected Pico SWD link.")
+                    # One operator action makes one call. An uncertain outcome
+                    # is reported as an error and is never retried here.
+                    result = self.link.test_tec1_pulse()
                 else:
                     continue
                 result.setdefault("transport", self.transport)
@@ -159,6 +208,7 @@ class Dashboard:
         self.message = tk.StringVar(value="Ready. Auto tries STM32 USB-C first, then Pico SWD when no USB device is present.")
         self.reason = tk.StringVar(value="Connect to a device before starting.")
         self.note = tk.StringVar()
+        self.tec1_test_result = tk.StringVar(value="TEC1 pulse test has not been run.")
         self.metric_values = []
         self.channel_values = []
         self.current_trip_values = []
@@ -283,10 +333,19 @@ class Dashboard:
                     self.current_trip_values.append(trip)
                 values.append(value)
             self.channel_values.append((status, values))
-        self._label(channels, "* Nominal current · uncalibrated; — means unavailable. Applied duty is the firmware output.",
+        self._label(channels, "* Nominal current · uncalibrated; — means unavailable. Separate pulse results appear below.",
                     size=9, color="muted").grid(row=4, column=0, columnspan=5, sticky="w", padx=16, pady=(6, 0))
         self._label(channels, "Software current trip; peak current requires hardware limiting.",
                     size=9, color="amber").grid(row=5, column=0, columnspan=5, sticky="w", padx=16, pady=(0, 10))
+        pulse_actions = tk.Frame(channels, bg=COLORS["panel"])
+        pulse_actions.grid(row=6, column=0, columnspan=5, sticky="ew", padx=16, pady=(0, 6))
+        self.test_tec1_button = self._button(pulse_actions, "Test TEC1 (1 ms)", self.test_tec1)
+        self.test_tec1_button.pack(side="left", padx=(0, 12))
+        self._label(pulse_actions, "Full-voltage 1ms pulse; automatic off. Current protection remains uncommissioned.",
+                    size=9, color="amber", wraplength=650).pack(side="left", fill="x", expand=True)
+        self.tec1_test_result_label = self._label(channels, variable=self.tec1_test_result,
+                                                 size=9, color="muted", wraplength=1000)
+        self.tec1_test_result_label.grid(row=7, column=0, columnspan=5, sticky="w", padx=16, pady=(0, 12))
 
         bottom = tk.Frame(shell, bg=COLORS["bg"])
         bottom.grid(row=4, column=0, sticky="ew")
@@ -345,6 +404,7 @@ class Dashboard:
         self.reason_label.configure(wraplength=width)
         self.note_label.configure(wraplength=width)
         self.footer.configure(wraplength=max(500, event.width - 10))
+        self.tec1_test_result_label.configure(wraplength=max(500, event.width - 40))
 
     def _is_demo(self):
         return self.source.get() == "Demo (simulated)"
@@ -366,6 +426,7 @@ class Dashboard:
         self.dirty = False
         self.demo_armed = False
         self.active_transport = None
+        self.tec1_test_result.set("TEC1 pulse test has not been run on this connection.")
         if self._is_demo():
             self.demo_started = time.monotonic()
             self._demo_update()
@@ -507,6 +568,20 @@ class Dashboard:
             self.command_pending = False
         self._command([("stop", 0)])
 
+    def test_tec1(self):
+        reason = tec1_test_block_reason(
+            self.snapshot, connected=self.connected, transport=self.active_transport,
+            now=time.monotonic(), command_pending=self.command_pending,
+            last_error=self.last_error, demo=self._is_demo())
+        if reason:
+            self.tec1_test_result.set(reason)
+            return
+        self.command_pending = True
+        self.tec1_test_result.set("TEC1 single pulse requested. Waiting for the result; no automatic repeat.")
+        self.worker.submit(self.generation, "tec1_test", priority=2)
+        self.message.set("Running one TEC1 pulse through Pico SWD. Other requests wait for the result.")
+        self._render_controls()
+
     def _accept_status(self, data):
         now = time.monotonic()
         self.snapshot = Snapshot.from_status(data, now)
@@ -534,20 +609,26 @@ class Dashboard:
             origin, result = payload
             self.poll_pending = False
             self.connecting = False
-            if origin == "command":
+            if origin in ("command", "tec1_test"):
                 self.command_pending = False
             if kind == "status":
                 try:
                     if origin == "command":
                         self.dirty = False
+                    pulse_text = tec1_test_result_text(result) if origin == "tec1_test" else None
                     self._accept_status(result)
-                    if origin == "command":
+                    if origin == "tec1_test":
+                        self.tec1_test_result.set(pulse_text)
+                        self.message.set("TEC1 test returned. Normal Start remains subject to every firmware interlock.")
+                    elif origin == "command":
                         self.message.set("Firmware acknowledged the request. Reported mode and applied duty are shown above.")
                     elif origin == "connect":
                         self.message.set("Connected. Live readings come from the controller; Start is subject to firmware interlocks.")
                 except ValueError as error:
                     self.last_error = str(error)
                     self.message.set(str(error))
+                    if origin == "tec1_test":
+                        self.tec1_test_result.set(str(error))
                     if origin == "connect":
                         self.connected = False
             else:
@@ -558,6 +639,8 @@ class Dashboard:
                         if self.active_transport == "usb" or self.source.get() == "STM32 USB-C"
                         else "Check controller USB-C or Pico USB, target power and the selected connection; then reconnect.")
                 self.message.set(f"{result}  {hint}")
+                if origin == "tec1_test":
+                    self.tec1_test_result.set(f"TEC1 test failed or its result is uncertain: {result} No automatic retry was made.")
             self._render()
         self.root.after(100, self._drain)
 
@@ -606,7 +689,7 @@ class Dashboard:
             self.connection_text.set("●  LIVE CONNECTED")
             self.connection_label.configure(fg=COLORS["accent"])
             link_name = "STM32 USB-C" if self.active_transport == "usb" else "Pico SWD"
-            self.detail_text.set(f"{link_name} · " + ("Outputs locked OFF · bench image" if sample.outputs_locked_off else "Firmware interlocks active"))
+            self.detail_text.set(f"{link_name} · " + ("Normal control locked OFF · separate TEC1 pulse test" if sample.outputs_locked_off else "Firmware interlocks active"))
         else:
             self.connection_text.set("●  READ ERROR" if self.connected and self.last_error else ("●  STALE" if self.connected else "●  DISCONNECTED"))
             self.connection_label.configure(fg=COLORS["amber"] if self.connected else COLORS["muted"])
@@ -657,6 +740,10 @@ class Dashboard:
         self.reason.set(reason or ("Demo controls affect simulated values only." if demo else "Ready. Start requests all three channels; firmware checks every interlock."))
         self.start_button.configure(state="normal" if available and not reason else "disabled")
         self.stop_button.configure(state="normal" if (self.connected or demo) and sample and sample.schema >= 2 else "disabled")
+        pulse_reason = tec1_test_block_reason(
+            sample, connected=self.connected, transport=self.active_transport, now=now,
+            command_pending=self.command_pending, last_error=self.last_error, demo=demo)
+        self.test_tec1_button.configure(state="normal" if pulse_reason is None else "disabled")
         unregulated = self.mode.get() == 1 or (sample is not None and sample.mode == 1)
         self.note.set("Bypasses dew-point protection; condensation may occur. Sensor and current trips remain active. Margin is ignored." if unregulated else "Regulated target = max(0 °C, dew point + margin). Applying settings never starts outputs.")
         self.note_label.configure(fg=COLORS["amber"] if unregulated else COLORS["muted"])

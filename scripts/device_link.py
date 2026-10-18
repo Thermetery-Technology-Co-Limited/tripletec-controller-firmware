@@ -1,4 +1,8 @@
-"""Bounded, serialized Pico SWD transport; never halts, resets or writes PWM."""
+"""Serialized Pico SWD status/control, plus an explicit supervised pulse test.
+
+Normal reads/commands never halt/reset or write PWM. Only test_tec1_pulse(),
+called by the operator's separate GUI button, uses a hardware-timed test.
+"""
 from __future__ import annotations
 
 import json
@@ -180,6 +184,10 @@ class DeviceLink:
             if status["schema"] == 2 and status["armed_mask"]:
                 return self.command("heartbeat")
             return status
+
+    def test_tec1_pulse(self) -> dict:
+        from .tec1_pulse import run_tec1_pulse
+        return run_tec1_pulse(self)
 
     def command(self, name: str, value: int = 0) -> dict:
         if name not in OPCODES or type(value) is not int:

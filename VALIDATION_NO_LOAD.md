@@ -2,6 +2,8 @@
 
 Version 0.2.1 was programmed and verified through the Pico CMSIS-DAP probe. The operator reports the 8-pin inputs and 10-pin interboard cable connected, with the 12V supply on. No TECs or plate thermistors are attached. Supply presence is operator-provided information; this PCB has no firmware-readable 12V monitor.
 
+Later observations: the current inputs temporarily recovered near nominal zero after the board was moved, then returned near ground with the harness connected and untouched. The fault remains unresolved. See [COMMISSIONING.md](COMMISSIONING.md) and `validation/pre-tec-readiness-2026-10-18.json` for the latest checks and load-rating concerns.
+
 ## Findings
 
 All 12 diagnostic snapshots were collected successfully. Firmware sequences and uptime advanced, with no new SHT31, ADS1220 or internal ADC errors. The internal reference read 1498 counts in the final snapshot, corresponding to estimated VDDA 3.280V using the nominal 1.20V reference. This supports ADC/reference operation; it does not validate the external current-sense path or calibrate VDDA.

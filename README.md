@@ -99,6 +99,8 @@ An optional, independently sequenced 32-byte ADC diagnostic block reports ADC1 c
 
 ## Limits before powered operation
 
+Follow [COMMISSIONING.md](COMMISSIONING.md) before connecting a TEC. The current-sense supply/signal problem recurred after temporary recovery, and the reported 12V/320W load exceeds the XT60 channels' 10A measurement range if operated at that measured power and voltage. Physical fault isolation and a review of actual load/power-path ratings are required. The output lock remains in place.
+
 This stage cannot establish TEC polarity, cooling power, current limits, heatsink capacity, thermal lag, or loop gains. Software current trips are implemented and tested, but the actual current shutdown and PWM power stage are not commissioned. Current values and thermistor temperatures use nominal 3.3V and component constants; measure AVCC, current zero offsets, resistor ratios, and the actual thermistor R–T characteristics before claiming temperature accuracy. The thermistor range note on the drawing does not exactly match a nominal B3950 curve.
 
 The 3°C offset is the requested initial setting, not a validated condensation guarantee. Sensor placement, accuracy, gradients, and thermal inertia must be measured. Turning cooling off does not actively warm an already cold plate. Final powered tests must verify undershoot and humidity-step behavior before removing the output lock.

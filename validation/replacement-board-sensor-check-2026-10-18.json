@@ -1,0 +1,709 @@
+{
+  "check": "replacement-board-read-only-after-flash",
+  "identity": {
+    "idcode": "0x10036414",
+    "uid": "05daff31-35574832-43096635",
+    "flash_kib": 256,
+    "backup": "C:\\Users\\Administrator\\Documents\\TripleTECDriver\\hardware\\replacement-05daff31-35574832-43096635-before-programming-2026-10-18.bin",
+    "backup_sha256": "3b874d3ba46c638fc3094f8e92fb744ca974893873f8885f54e23760f9b6311b",
+    "all_flash_erased": true
+  },
+  "samples": [
+    {
+      "schema": 2,
+      "sequence": 66,
+      "uptime_ms": 8000,
+      "outputs_locked_off": true,
+      "valid_flags": 35,
+      "sht31_errors": 0,
+      "ads1220_errors": 0,
+      "ambient_c": 27.67,
+      "rh_percent": 61.152,
+      "dewpoint_c": 19.506,
+      "target_c": 22.506,
+      "plate_c": [
+        null,
+        null,
+        null
+      ],
+      "ntc_adc_raw": [
+        6822094,
+        6822129,
+        6822066
+      ],
+      "current_adc_raw": [
+        2042,
+        386,
+        408
+      ],
+      "current_a_nominal": [
+        -0.168,
+        -0.072,
+        -0.005
+      ],
+      "applied_duty": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "active_faults": [
+        6194,
+        6194,
+        6194
+      ],
+      "loop_count": 7767,
+      "button_pressed": false,
+      "mode": 0,
+      "mode_name": "regulated",
+      "margin_c": 3.0,
+      "armed_mask": 0,
+      "desired_duty": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "command_ack_seq": 0,
+      "command_result": 0,
+      "command_result_name": "OK",
+      "adc_diagnostics": {
+        "schema": 1,
+        "sequence": 66,
+        "uptime_ms": 8000,
+        "valid": true,
+        "acquisition_ok": true,
+        "reference_plausible": true,
+        "vrefint_adc_raw": 1485,
+        "estimated_vdda_v": 3.309,
+        "adc_errors": 0,
+        "reference_basis": "Nominal 1.20 V VREFINT; estimate only, not calibrated"
+      },
+      "current_limit_policy": {
+        "valid": true,
+        "schema": 1,
+        "sequence": 66,
+        "uptime_ms": 8000,
+        "current_limits_a": [
+          0.0,
+          9.0,
+          9.0
+        ],
+        "current_limits_commissioned_mask": 0
+      },
+      "current_limits_a": [
+        0.0,
+        9.0,
+        9.0
+      ],
+      "current_limits_commissioned_mask": 0
+    },
+    {
+      "schema": 2,
+      "sequence": 72,
+      "uptime_ms": 8750,
+      "outputs_locked_off": true,
+      "valid_flags": 35,
+      "sht31_errors": 0,
+      "ads1220_errors": 0,
+      "ambient_c": 27.7,
+      "rh_percent": 61.134,
+      "dewpoint_c": 19.528,
+      "target_c": 22.528,
+      "plate_c": [
+        null,
+        null,
+        null
+      ],
+      "ntc_adc_raw": [
+        6822152,
+        6822128,
+        6822185
+      ],
+      "current_adc_raw": [
+        2044,
+        395,
+        382
+      ],
+      "current_a_nominal": [
+        -0.107,
+        -0.044,
+        -0.084
+      ],
+      "applied_duty": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "active_faults": [
+        6194,
+        6706,
+        6706
+      ],
+      "loop_count": 8502,
+      "button_pressed": false,
+      "mode": 0,
+      "mode_name": "regulated",
+      "margin_c": 3.0,
+      "armed_mask": 0,
+      "desired_duty": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "command_ack_seq": 0,
+      "command_result": 0,
+      "command_result_name": "OK",
+      "adc_diagnostics": {
+        "schema": 1,
+        "sequence": 72,
+        "uptime_ms": 8750,
+        "valid": true,
+        "acquisition_ok": true,
+        "reference_plausible": true,
+        "vrefint_adc_raw": 1485,
+        "estimated_vdda_v": 3.309,
+        "adc_errors": 0,
+        "reference_basis": "Nominal 1.20 V VREFINT; estimate only, not calibrated"
+      },
+      "current_limit_policy": {
+        "valid": true,
+        "schema": 1,
+        "sequence": 72,
+        "uptime_ms": 8750,
+        "current_limits_a": [
+          0.0,
+          9.0,
+          9.0
+        ],
+        "current_limits_commissioned_mask": 0
+      },
+      "current_limits_a": [
+        0.0,
+        9.0,
+        9.0
+      ],
+      "current_limits_commissioned_mask": 0
+    },
+    {
+      "schema": 2,
+      "sequence": 76,
+      "uptime_ms": 9250,
+      "outputs_locked_off": true,
+      "valid_flags": 35,
+      "sht31_errors": 0,
+      "ads1220_errors": 0,
+      "ambient_c": 27.7,
+      "rh_percent": 61.146,
+      "dewpoint_c": 19.532,
+      "target_c": 22.532,
+      "plate_c": [
+        null,
+        null,
+        null
+      ],
+      "ntc_adc_raw": [
+        6822166,
+        6822162,
+        6822146
+      ],
+      "current_adc_raw": [
+        2040,
+        398,
+        395
+      ],
+      "current_a_nominal": [
+        -0.229,
+        -0.035,
+        -0.044
+      ],
+      "applied_duty": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "active_faults": [
+        6194,
+        6194,
+        6706
+      ],
+      "loop_count": 8987,
+      "button_pressed": false,
+      "mode": 0,
+      "mode_name": "regulated",
+      "margin_c": 3.0,
+      "armed_mask": 0,
+      "desired_duty": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "command_ack_seq": 0,
+      "command_result": 0,
+      "command_result_name": "OK",
+      "adc_diagnostics": {
+        "schema": 1,
+        "sequence": 76,
+        "uptime_ms": 9250,
+        "valid": true,
+        "acquisition_ok": true,
+        "reference_plausible": true,
+        "vrefint_adc_raw": 1485,
+        "estimated_vdda_v": 3.309,
+        "adc_errors": 0,
+        "reference_basis": "Nominal 1.20 V VREFINT; estimate only, not calibrated"
+      },
+      "current_limit_policy": {
+        "valid": true,
+        "schema": 1,
+        "sequence": 76,
+        "uptime_ms": 9250,
+        "current_limits_a": [
+          0.0,
+          9.0,
+          9.0
+        ],
+        "current_limits_commissioned_mask": 0
+      },
+      "current_limits_a": [
+        0.0,
+        9.0,
+        9.0
+      ],
+      "current_limits_commissioned_mask": 0
+    },
+    {
+      "schema": 2,
+      "sequence": 80,
+      "uptime_ms": 9750,
+      "outputs_locked_off": true,
+      "valid_flags": 35,
+      "sht31_errors": 0,
+      "ads1220_errors": 0,
+      "ambient_c": 27.713,
+      "rh_percent": 61.114,
+      "dewpoint_c": 19.536,
+      "target_c": 22.536,
+      "plate_c": [
+        null,
+        null,
+        null
+      ],
+      "ntc_adc_raw": [
+        6822197,
+        6822191,
+        6822210
+      ],
+      "current_adc_raw": [
+        2042,
+        425,
+        415
+      ],
+      "current_a_nominal": [
+        -0.168,
+        0.047,
+        0.017
+      ],
+      "applied_duty": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "active_faults": [
+        6194,
+        6194,
+        6194
+      ],
+      "loop_count": 9487,
+      "button_pressed": false,
+      "mode": 0,
+      "mode_name": "regulated",
+      "margin_c": 3.0,
+      "armed_mask": 0,
+      "desired_duty": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "command_ack_seq": 0,
+      "command_result": 0,
+      "command_result_name": "OK",
+      "adc_diagnostics": {
+        "schema": 1,
+        "sequence": 80,
+        "uptime_ms": 9750,
+        "valid": true,
+        "acquisition_ok": true,
+        "reference_plausible": true,
+        "vrefint_adc_raw": 1485,
+        "estimated_vdda_v": 3.309,
+        "adc_errors": 0,
+        "reference_basis": "Nominal 1.20 V VREFINT; estimate only, not calibrated"
+      },
+      "current_limit_policy": {
+        "valid": true,
+        "schema": 1,
+        "sequence": 80,
+        "uptime_ms": 9750,
+        "current_limits_a": [
+          0.0,
+          9.0,
+          9.0
+        ],
+        "current_limits_commissioned_mask": 0
+      },
+      "current_limits_a": [
+        0.0,
+        9.0,
+        9.0
+      ],
+      "current_limits_commissioned_mask": 0
+    },
+    {
+      "schema": 2,
+      "sequence": 86,
+      "uptime_ms": 10500,
+      "outputs_locked_off": true,
+      "valid_flags": 35,
+      "sht31_errors": 0,
+      "ads1220_errors": 0,
+      "ambient_c": 27.686,
+      "rh_percent": 61.109,
+      "dewpoint_c": 19.509,
+      "target_c": 22.509,
+      "plate_c": [
+        null,
+        null,
+        null
+      ],
+      "ntc_adc_raw": [
+        6822176,
+        6822273,
+        6822257
+      ],
+      "current_adc_raw": [
+        2037,
+        437,
+        393
+      ],
+      "current_a_nominal": [
+        -0.321,
+        0.084,
+        -0.05
+      ],
+      "applied_duty": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "active_faults": [
+        6194,
+        6194,
+        6706
+      ],
+      "loop_count": 10222,
+      "button_pressed": false,
+      "mode": 0,
+      "mode_name": "regulated",
+      "margin_c": 3.0,
+      "armed_mask": 0,
+      "desired_duty": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "command_ack_seq": 0,
+      "command_result": 0,
+      "command_result_name": "OK",
+      "adc_diagnostics": {
+        "schema": 1,
+        "sequence": 86,
+        "uptime_ms": 10500,
+        "valid": true,
+        "acquisition_ok": true,
+        "reference_plausible": true,
+        "vrefint_adc_raw": 1485,
+        "estimated_vdda_v": 3.309,
+        "adc_errors": 0,
+        "reference_basis": "Nominal 1.20 V VREFINT; estimate only, not calibrated"
+      },
+      "current_limit_policy": {
+        "valid": true,
+        "schema": 1,
+        "sequence": 86,
+        "uptime_ms": 10500,
+        "current_limits_a": [
+          0.0,
+          9.0,
+          9.0
+        ],
+        "current_limits_commissioned_mask": 0
+      },
+      "current_limits_a": [
+        0.0,
+        9.0,
+        9.0
+      ],
+      "current_limits_commissioned_mask": 0
+    },
+    {
+      "schema": 2,
+      "sequence": 90,
+      "uptime_ms": 11000,
+      "outputs_locked_off": true,
+      "valid_flags": 35,
+      "sht31_errors": 0,
+      "ads1220_errors": 0,
+      "ambient_c": 27.7,
+      "rh_percent": 61.123,
+      "dewpoint_c": 19.526,
+      "target_c": 22.526,
+      "plate_c": [
+        null,
+        null,
+        null
+      ],
+      "ntc_adc_raw": [
+        6822194,
+        6822252,
+        6822246
+      ],
+      "current_adc_raw": [
+        2044,
+        418,
+        450
+      ],
+      "current_a_nominal": [
+        -0.107,
+        0.026,
+        0.124
+      ],
+      "applied_duty": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "active_faults": [
+        6194,
+        6706,
+        6194
+      ],
+      "loop_count": 10722,
+      "button_pressed": false,
+      "mode": 0,
+      "mode_name": "regulated",
+      "margin_c": 3.0,
+      "armed_mask": 0,
+      "desired_duty": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "command_ack_seq": 0,
+      "command_result": 0,
+      "command_result_name": "OK",
+      "adc_diagnostics": {
+        "schema": 1,
+        "sequence": 90,
+        "uptime_ms": 11000,
+        "valid": true,
+        "acquisition_ok": true,
+        "reference_plausible": true,
+        "vrefint_adc_raw": 1485,
+        "estimated_vdda_v": 3.309,
+        "adc_errors": 0,
+        "reference_basis": "Nominal 1.20 V VREFINT; estimate only, not calibrated"
+      },
+      "current_limit_policy": {
+        "valid": true,
+        "schema": 1,
+        "sequence": 90,
+        "uptime_ms": 11000,
+        "current_limits_a": [
+          0.0,
+          9.0,
+          9.0
+        ],
+        "current_limits_commissioned_mask": 0
+      },
+      "current_limits_a": [
+        0.0,
+        9.0,
+        9.0
+      ],
+      "current_limits_commissioned_mask": 0
+    },
+    {
+      "schema": 2,
+      "sequence": 94,
+      "uptime_ms": 11500,
+      "outputs_locked_off": true,
+      "valid_flags": 35,
+      "sht31_errors": 0,
+      "ads1220_errors": 0,
+      "ambient_c": 27.67,
+      "rh_percent": 61.106,
+      "dewpoint_c": 19.494,
+      "target_c": 22.494,
+      "plate_c": [
+        null,
+        null,
+        null
+      ],
+      "ntc_adc_raw": [
+        6822226,
+        6822218,
+        6822243
+      ],
+      "current_adc_raw": [
+        2041,
+        412,
+        446
+      ],
+      "current_a_nominal": [
+        -0.198,
+        0.008,
+        0.111
+      ],
+      "applied_duty": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "active_faults": [
+        6194,
+        6706,
+        6194
+      ],
+      "loop_count": 11206,
+      "button_pressed": false,
+      "mode": 0,
+      "mode_name": "regulated",
+      "margin_c": 3.0,
+      "armed_mask": 0,
+      "desired_duty": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "command_ack_seq": 0,
+      "command_result": 0,
+      "command_result_name": "OK",
+      "adc_diagnostics": {
+        "schema": 1,
+        "sequence": 94,
+        "uptime_ms": 11500,
+        "valid": true,
+        "acquisition_ok": true,
+        "reference_plausible": true,
+        "vrefint_adc_raw": 1485,
+        "estimated_vdda_v": 3.309,
+        "adc_errors": 0,
+        "reference_basis": "Nominal 1.20 V VREFINT; estimate only, not calibrated"
+      },
+      "current_limit_policy": {
+        "valid": true,
+        "schema": 1,
+        "sequence": 94,
+        "uptime_ms": 11500,
+        "current_limits_a": [
+          0.0,
+          9.0,
+          9.0
+        ],
+        "current_limits_commissioned_mask": 0
+      },
+      "current_limits_a": [
+        0.0,
+        9.0,
+        9.0
+      ],
+      "current_limits_commissioned_mask": 0
+    },
+    {
+      "schema": 2,
+      "sequence": 100,
+      "uptime_ms": 12250,
+      "outputs_locked_off": true,
+      "valid_flags": 35,
+      "sht31_errors": 0,
+      "ads1220_errors": 0,
+      "ambient_c": 27.686,
+      "rh_percent": 61.132,
+      "dewpoint_c": 19.516,
+      "target_c": 22.516,
+      "plate_c": [
+        null,
+        null,
+        null
+      ],
+      "ntc_adc_raw": [
+        6822239,
+        6822247,
+        6822266
+      ],
+      "current_adc_raw": [
+        2044,
+        403,
+        437
+      ],
+      "current_a_nominal": [
+        -0.107,
+        -0.02,
+        0.084
+      ],
+      "applied_duty": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "active_faults": [
+        6194,
+        6706,
+        6194
+      ],
+      "loop_count": 11941,
+      "button_pressed": false,
+      "mode": 0,
+      "mode_name": "regulated",
+      "margin_c": 3.0,
+      "armed_mask": 0,
+      "desired_duty": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "command_ack_seq": 0,
+      "command_result": 0,
+      "command_result_name": "OK",
+      "adc_diagnostics": {
+        "schema": 1,
+        "sequence": 100,
+        "uptime_ms": 12250,
+        "valid": true,
+        "acquisition_ok": true,
+        "reference_plausible": true,
+        "vrefint_adc_raw": 1485,
+        "estimated_vdda_v": 3.309,
+        "adc_errors": 0,
+        "reference_basis": "Nominal 1.20 V VREFINT; estimate only, not calibrated"
+      },
+      "current_limit_policy": {
+        "valid": true,
+        "schema": 1,
+        "sequence": 100,
+        "uptime_ms": 12250,
+        "current_limits_a": [
+          0.0,
+          9.0,
+          9.0
+        ],
+        "current_limits_commissioned_mask": 0
+      },
+      "current_limits_a": [
+        0.0,
+        9.0,
+        9.0
+      ],
+      "current_limits_commissioned_mask": 0
+    }
+  ]
+}

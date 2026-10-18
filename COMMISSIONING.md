@@ -1,6 +1,6 @@
 # Checks before connecting a TEC
 
-Status on 2026-10-18: **not commissioned; retain the compile-time output lock**. TECs and plate thermistors remain disconnected. The operator has a multimeter, but no oscilloscope or adjustable current-limited bench supply.
+Status on 2026-10-18: **not commissioned; retain the compile-time output lock**. TECs remain disconnected; thermistors on CN2/CN3 are connected and reporting temperatures, with CN1 open. The operator has a multimeter and confirms the external 12V PSU is fixed-output, with no adjustable constant-current limit. No oscilloscope or adjustable current-limited bench supply is available.
 
 The selected software trip thresholds are now unset/9A/9A. Channels 2/3 reject configuration above 9A and trip inclusively at a sampled magnitude of 9A in both modes. Every current-limit commissioning flag remains false. This does not limit instantaneous current, change current acquisition speed, validate the power path or enable an output. A roughly 27A full-voltage on-pulse remains outside the XT60 sensors' measurement range even at low average duty.
 
@@ -11,6 +11,8 @@ Latest update: the operator identified and secured a loose 10-pin connection. Th
 Earlier observations: the external current-sense signals briefly recovered to nominal zero-current levels after the board was moved, then returned near ground with the 10-pin cable reportedly connected and untouched. A 60-snapshot observation covering 34.25 seconds found means of approximately 0.0154V, 0.0094V and 0.0144V. The internal-reference ADC check passed throughout; its error count stayed zero. That temporary recovery alone did not resolve the issue; the loose connector was subsequently identified as described above.
 
 The operator reports that the 12V XT60 cooler assembly drew approximately 320W when directly connected to an external PSU. At 12V that is approximately 26.7A. The drawn XT60 channels 2/3 use ACS725-10AU sensors with a specified 0..10A measurement range. They cannot be assumed to monitor or protect this full load. Connector type does not establish the channel's safe rating. Channel 1's wider current-sensor range also does not establish the ratings of its fuse, PCB, wiring or thermal design. Confirm actual supply voltage, load identity and fitted parts during the engineer's power-path review.
+
+The fixed-output PSU does not provide the missing current regulation. A firmware trip, reduced PWM duty or faster ADC acquisition alone cannot guarantee a 9A peak ceiling on this direct-switching stage. Before energizing the reported load, establish appropriately rated hardware current regulation/limiting for each XT60 channel and verify its transient behavior, sensor calibration and shutdown on a dummy load. A shared supply's total-current limit does not by itself establish independent per-channel limits; a fuse does not regulate operating current. Any future firmware current governor must be designed around the verified power stage and PWM-synchronized acquisition. Keep the output lock until this hardware and switching validation is complete.
 
 ## Work possible with the multimeter and locked firmware
 

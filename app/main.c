@@ -408,7 +408,7 @@ int main(void)
     usb_protocol_init(&usb_protocol, usb_apply, usb_snapshot, usb_enqueue, NULL);
     usb_enabled = usb_device_init();
     usb_session_generation = usb_device_session_generation();
-    board_uart_write("TripleTECDriver v0.5.1: regulate displayed dew target; bench lock ON.\r\n");
+    board_uart_write("TripleTECDriver v0.5.2: retain verified TEC1 trips across zero refresh; bench lock ON.\r\n");
 
     for (;;) {
         uint32_t now = board_millis();

@@ -13,7 +13,7 @@ enum { CONTROL_INACTIVE, CONTROL_COOLING, CONTROL_HOLDING };
 #define HOLD_HYSTERESIS_C 0.2f
 #define HOLD_MAX_DUTY (5.0f / 12.0f)
 static struct {
-    uint32_t state, flags, fault, trip_ma, baseline, zero_at, started, last_pulse;
+    uint32_t state, flags, fault, trip_ma, baseline, verified_baseline, zero_at, started, last_pulse;
     uint32_t pulses, kind, elapsed, duration, period, on_us;
     bool have_pulse;
     float min_plate, guard_floor, target, plate, integral, demand, pulse_credit;
@@ -49,6 +49,7 @@ void commissioning_stop(uint32_t reason, uint32_t now)
         capture_stage();
         session.state = reason == 0U ? COMPLETE : FAULT;
         session.fault = reason;
+        if (reason != 0U && reason != 8U) { session.flags &= ~TRIP_VERIFIED; }
     }
     commission_stage_stop();
     board_outputs_force_off();
@@ -105,6 +106,13 @@ control_result_t commissioning_prepare(const tec_inputs_t *in, const tec_control
     if (commissioning_active() || guard(in, ctrl, bench_locked, now, 0.0f, true, &target)) {
         return CONTROL_INTERLOCK;
     }
+    /* A normal stop, settings edit or zero refresh does not undo a demonstrated
+     * shutdown. Retain that proof only in this boot, after a successful new
+     * OFF-only check, and against the original verified baseline (no drift).
+     */
+    const bool retain_trip = (session.flags & TRIP_VERIFIED) != 0U &&
+        session.trip_ma == 15000U && (session.fault == 0U || session.fault == 8U);
+    const uint32_t verified_baseline = session.verified_baseline;
     commissioning_stop(8U, now);
     commissioning_init();
     observe(in, ctrl);
@@ -140,6 +148,12 @@ control_result_t commissioning_prepare(const tec_inputs_t *in, const tec_control
         session.state = FAULT; session.fault = 3U; return CONTROL_INTERLOCK;
     }
     session.flags |= ZERO_VALID | SELFTEST;
+    const uint32_t drift = session.baseline > verified_baseline ?
+        session.baseline - verified_baseline : verified_baseline - session.baseline;
+    if (retain_trip && drift <= 20U) {
+        session.flags |= TRIP_VERIFIED;
+        session.verified_baseline = verified_baseline;
+    }
     session.zero_at = board_millis();
     session.state = PREPARED;
     session.min_plate = in->plate[0].temperature_c;
@@ -164,10 +178,12 @@ control_result_t commissioning_start(const tec_inputs_t *in, const tec_controlle
     const bool drive = kind != 0 && kind != 4 && kind != 6;
     if (!commission_stage_prepare((uint16_t)session.baseline, delta, drive)) {
         commission_stage_stop();
+        session.flags &= ~TRIP_VERIFIED;
         session.state = FAULT; session.fault = 3U; return CONTROL_INTERLOCK;
     }
     if (kind >= 3 && !commission_stage_set_profile(5000U, 12U)) {
         commission_stage_stop();
+        session.flags &= ~TRIP_VERIFIED;
         session.state = FAULT; session.fault = 3U; return CONTROL_INTERLOCK;
     }
     session.kind = (uint32_t)kind;
@@ -263,7 +279,11 @@ void commissioning_tick(const tec_inputs_t *in, const tec_controller_t *ctrl,
                 session.capture.trip_timer_us < 1000U && difference <= 20U &&
                 session.capture.pin_low && !session.capture.timer_running && session.capture.samples >= 8U;
             commissioning_stop(verified ? 0U : 3U, now);
-            if (verified) { session.flags |= TRIP_VERIFIED; session.state = TRIP_PASSED; }
+            if (verified) {
+                session.flags |= TRIP_VERIFIED;
+                session.verified_baseline = session.baseline;
+                session.state = TRIP_PASSED;
+            }
             return;
         }
     } else {
@@ -287,7 +307,10 @@ void commissioning_snapshot(commission_telemetry_t *dest, uint32_t now)
     if (dest == NULL) { return; }
     if (commissioning_active()) { capture_stage(); }
     uint32_t flags = session.flags;
-    if (now - session.zero_at > 300000U) { flags &= ~(ZERO_VALID | TRIP_VERIFIED); }
+    /* A start needs a recent zero, but expiry is not a failed shutdown test.
+     * The running session retains its zero while continuous ADC monitoring owns it.
+     */
+    if (!commissioning_active() && now - session.zero_at > 300000U) { flags &= ~ZERO_VALID; }
     *dest = (commission_telemetry_t) {
         .magic = UINT32_C(0x5445434d), .schema = 3U, .uptime_ms = now,
         .state = session.state, .flags = flags | (session.capture.prepared && commissioning_active() ? 32U : 0U),

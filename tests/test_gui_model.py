@@ -4,7 +4,7 @@ import sys
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from gui.model import (Snapshot, channel_status, current_trip_label, format_value,
+from gui.model import (Snapshot, channel_status, current_reading_text, current_trip_label, format_value,
                        margin_millic, mode_label)
 
 
@@ -213,6 +213,37 @@ class PresentationTests(unittest.TestCase):
                        *({"current_limits_commissioned_mask": value} for value in (-1, 8, True, "7"))):
             with self.subTest(update=update), self.assertRaises(ValueError):
                 Snapshot.from_status(status(**update), 0)
+
+    def test_supervised_trip_status_uses_actual_verification(self):
+        for changes, label in (({}, "Trip 15 A · verify shutdown"),
+                               ({"trip_verified": True}, "Trip 15 A · verified"),
+                               ({"trip_verified": True, "zero_valid": False}, "Trip 15 A · refresh zero"),
+                               ({"state": 2, "stage_prepared": True, "drive": True}, "Trip 5 A · verifying"),
+                               ({"state": 4, "stage_prepared": True, "drive": True}, "Trip 15 A · active"),
+                               ({"state": 4, "stage_prepared": True}, "Trip 15 A · dry run")):
+            with self.subTest(changes=changes):
+                sample = Snapshot.from_status(status(current_limits_a=[15, 9, 9],
+                    current_limits_commissioned_mask=0, commissioning=commissioning_status(**changes)), 0)
+                self.assertEqual(current_trip_label(sample, 0), label)
+                self.assertIn("uncommissioned", current_trip_label(sample, 1))
+                self.assertIsNotNone(sample.start_block_reason(True, 0))
+
+    def test_active_current_uses_fast_adc_peak_not_idle_conversion(self):
+        commissioning = commissioning_status(state=4, stage_prepared=True, drive=True,
+                                             last_adc=2040, peak_adc=2340)
+        sample = Snapshot.from_status(status(current_a_nominal=[0, 0.12, 0],
+            commissioning=commissioning), 0)
+        self.assertEqual(current_reading_text(sample, 0), "9.16 A peak")
+        self.assertEqual(current_reading_text(sample, 1), "0.12 A")
+        self.assertEqual(channel_status(sample, 0, True, 0), "Supervised · cooling")
+        self.assertEqual(channel_status(sample, 0, True, 10), "Stale reading")
+        for changes in ({"zero_valid": False}, {"stage_prepared": False},
+                        {"sample_count": 0}, {"peak_adc": 4095}, {"baseline_adc": None}):
+            sample = Snapshot.from_status(status(commissioning={**commissioning, **changes}), 0)
+            self.assertEqual(current_reading_text(sample, 0), "—")
+        sample = Snapshot.from_status(status(current_a_nominal=[0.03, 0, 0],
+            commissioning={**commissioning, "state": 5}), 0)
+        self.assertEqual(current_reading_text(sample, 0), "0.03 A")
 
     def test_start_requires_known_positive_commissioned_current_trips_in_both_modes(self):
         healthy = status(outputs_locked_off=False, active_faults=[0, 0, 0],

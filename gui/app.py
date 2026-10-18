@@ -13,7 +13,7 @@ import time
 import tkinter as tk
 from tkinter import ttk
 
-from .model import (Snapshot, channel_status, current_trip_label, format_value,
+from .model import (Snapshot, channel_status, current_reading_text, current_trip_label, format_value,
                     margin_millic, mode_label)
 
 COLORS = {"bg": "#0C121B", "panel": "#151E2B", "raised": "#1C2838",
@@ -77,7 +77,7 @@ def commissioning_block_reason(sample, action, *, connected, transport, now,
     if sample.mode != 0 or sample.margin_c is None or sample.margin_c < 3:
         return "Use regulated mode with a dew-point margin of at least 3 °C."
     if action != "prepare" and commissioning.get("state") == 6:
-        return "Prepare TEC1 again after STOP or a fault."
+        return "Prepare TEC1 again after STOP or a fault; a valid shutdown verification is retained."
     if action != "prepare" and not (commissioning.get("zero_valid") and
                                     commissioning.get("selftest_passed")):
         return "Prepare TEC1 and zero current before the shutdown test."
@@ -110,6 +110,10 @@ def commissioning_result_text(commissioning):
             text = "GPIO-low dry run · " + text
     if commissioning.get("zero_valid"):
         text += f" · zero ADC {commissioning.get('baseline_adc', '—')}"
+    else:
+        text += " · refresh current zero with Prepare"
+    if commissioning.get("trip_verified"):
+        text += " · shutdown verified"
     if commissioning.get("sample_count", 0) and commissioning.get("zero_valid"):
         peak = (commissioning["peak_adc"] - commissioning["baseline_adc"]) * 3.3 / 4095 / 0.0264
         text += f" · peak {peak:.2f} A nominal"
@@ -440,7 +444,7 @@ class Dashboard:
                     self.current_trip_values.append(trip)
                 values.append(value)
             self.channel_values.append((status, values))
-        self.current_note_label = self._label(channels, "* Nominal current · uncalibrated; — means unavailable. Applied shows normal control; commissioning results are below.",
+        self.current_note_label = self._label(channels, "* Current uses nominal gain. During TEC1 tests, peak is the maximum since start. Applied shows normal control; supervised duty is below.",
                     size=9, color="muted", wraplength=900)
         self.current_note_label.grid(row=4, column=0, columnspan=5, sticky="w", padx=16, pady=(6, 0))
         self.current_safety_label = self._label(channels, "Software current trip; peak current requires hardware limiting.",
@@ -878,7 +882,7 @@ class Dashboard:
             self.connection_text.set("●  LIVE CONNECTED")
             self.connection_label.configure(fg=COLORS["accent"])
             link_name = "STM32 USB-C" if self.active_transport == "usb" else "Pico SWD"
-            self.detail_text.set(f"{link_name} · " + ("Normal control locked OFF · separate TEC1 pulse test" if sample.outputs_locked_off else "Firmware interlocks active"))
+            self.detail_text.set(f"{link_name} · " + ("Normal control locked OFF · TEC1 supervised controls below" if sample.outputs_locked_off else "Firmware interlocks active"))
             if sample.commissioning_running:
                 self.detail_text.set(f"{link_name} · TEC1 commissioning active · STOP ALL cancels")
         else:
@@ -902,8 +906,14 @@ class Dashboard:
             for column, (widget, number) in enumerate(zip(widgets, numbers)):
                 text = format_value(number * 100 if number is not None and column >= 2 else number,
                                     " °C" if column == 0 else " A" if column == 1 else " %", 2 if column == 1 else 1)
+                if column == 1:
+                    text = current_reading_text(sample, index)
                 widget.configure(text=text, fg=COLORS["text"] if active else COLORS["muted"])
         self._render_controls()
+        if sample and sample.valid_flags is not None and sample.valid_flags & 0x80:
+            self.pulse_note_label.configure(text="Legacy pulse disabled. Use the current-protected TEC1 controls below.")
+        else:
+            self.pulse_note_label.configure(text="Full-voltage 1ms pulse; automatic off. Current protection remains uncommissioned.")
         self._draw_trend()
 
     def _render_controls(self):

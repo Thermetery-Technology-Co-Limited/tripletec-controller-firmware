@@ -439,13 +439,50 @@ static void test_zero_evidence_expiry(void)
     refresh(300100U); /* Exactly 300000 ms after the zero measurement. */
     assert((snapshot().flags & (TEST_ZERO | TEST_VERIFIED)) == (TEST_ZERO | TEST_VERIFIED));
     start(2);
+    refresh(300101U);
+    assert((snapshot().flags & (TEST_ZERO | TEST_VERIFIED)) == (TEST_ZERO | TEST_VERIFIED));
     commissioning_stop(0U, now_ms);
 
     refresh(300101U);
-    assert((snapshot().flags & (TEST_ZERO | TEST_VERIFIED)) == 0U);
+    assert((snapshot().flags & (TEST_ZERO | TEST_VERIFIED)) == TEST_VERIFIED);
     assert(commissioning_start(&inputs, &controller, true, 2, now_ms) == CONTROL_INTERLOCK);
     assert(commissioning_start(&inputs, &controller, true, 3, now_ms) == CONTROL_INTERLOCK);
     assert(commissioning_start(&inputs, &controller, true, 0, now_ms) == CONTROL_INTERLOCK);
+}
+
+static void test_verified_zero_refresh(void)
+{
+    verify_trip();
+    refresh(300101U);
+    assert(commissioning_prepare(&inputs, &controller, true, 15000, now_ms) == CONTROL_OK);
+    assert((snapshot().flags & (TEST_ZERO | TEST_VERIFIED)) == (TEST_ZERO | TEST_VERIFIED));
+    controller.config.dewpoint_margin_c += 0.5f;
+    start(5);
+    commissioning_stop(8U, now_ms); /* Ordinary STOP/settings change. */
+    assert(commissioning_prepare(&inputs, &controller, true, 15000, now_ms) == CONTROL_OK);
+    assert(snapshot().flags & TEST_VERIFIED);
+    start(5); /* Retained proof still passes the real start gate. */
+    commissioning_stop(4U, now_ms);
+    assert((snapshot().flags & TEST_VERIFIED) == 0U);
+    assert(commissioning_prepare(&inputs, &controller, true, 15000, now_ms) == CONTROL_OK);
+    assert((snapshot().flags & TEST_VERIFIED) == 0U);
+
+    verify_trip();
+    adc_a += 20U;
+    assert(commissioning_prepare(&inputs, &controller, true, 15000, now_ms) == CONTROL_OK);
+    assert(snapshot().flags & TEST_VERIFIED);
+    ++adc_a; /* Compare to the original proof, not the previous zero. */
+    assert(commissioning_prepare(&inputs, &controller, true, 15000, now_ms) == CONTROL_OK);
+    assert((snapshot().flags & TEST_VERIFIED) == 0U);
+    assert(commissioning_start(&inputs, &controller, true, 5, now_ms) == CONTROL_INTERLOCK);
+
+    verify_trip();
+    failed_read = read_calls;
+    assert(commissioning_prepare(&inputs, &controller, true, 15000, now_ms) == CONTROL_INTERLOCK);
+    assert((snapshot().flags & TEST_VERIFIED) == 0U);
+    verify_trip();
+    commissioning_init(); /* Reset/reflash never inherits a proof from another image. */
+    assert((snapshot().flags & (TEST_ZERO | TEST_VERIFIED)) == 0U);
 }
 
 static void test_live_guards(void)
@@ -665,6 +702,7 @@ int main(void)
     test_forty_percent_thermal_step();
     test_thirty_second_gpio_low_preflight();
     test_zero_evidence_expiry();
+    test_verified_zero_refresh();
     test_live_guards();
     test_hold27_below_target_and_hysteresis();
     test_hold27_slew_taper_and_no_burst();

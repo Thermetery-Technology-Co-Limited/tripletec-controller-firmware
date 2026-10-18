@@ -220,6 +220,20 @@ def format_value(value: float | None, unit: str = "", decimals: int = 1) -> str:
 
 def current_trip_label(snapshot: Snapshot | None, index: int) -> str:
     """Describe reported configuration separately from measured current and lock state."""
+    commissioning = snapshot.commissioning if snapshot and index == 0 else None
+    if commissioning and commissioning.get("valid") is True:
+        trip = _number(commissioning.get("trip_a"))
+        if trip is not None and trip > 0:
+            threshold = f"Trip {trip:g} A"
+            if commissioning.get("state") == 6 and commissioning.get("fault_code") != 8:
+                return threshold + " · fault, recheck"
+            if snapshot.commissioning_running and commissioning.get("stage_prepared"):
+                if commissioning.get("state") == 2:
+                    return "Trip 5 A · verifying"
+                return threshold + (" · active" if commissioning.get("drive") else " · dry run")
+            if commissioning.get("trip_verified"):
+                return threshold + (" · verified" if commissioning.get("zero_valid") else " · refresh zero")
+            return threshold + " · verify shutdown"
     limit = snapshot.current_limits_a[index] if snapshot else None
     if limit is None:
         return "SW trip unavailable"
@@ -232,11 +246,37 @@ def current_trip_label(snapshot: Snapshot | None, index: int) -> str:
     return threshold
 
 
+def current_reading_text(snapshot: Snapshot | None, index: int) -> str:
+    """The fast ADC owns TEC1 during tests; its peak is not an average current."""
+    if snapshot is None:
+        return "—"
+    if index == 0 and snapshot.commissioning_running:
+        commissioning = snapshot.commissioning
+        baseline = _number(commissioning.get("baseline_adc"))
+        peak = _number(commissioning.get("peak_adc"))
+        count = _integer(commissioning.get("sample_count"))
+        if (not commissioning.get("zero_valid") or not commissioning.get("stage_prepared") or
+                not count or baseline is None or peak is None or
+                not 0 < baseline < 4095 or not 0 <= peak < 4095):
+            return "—"
+        return f"{(peak - baseline) * 3.3 / 4095 / 0.0264:.2f} A peak"
+    return format_value(snapshot.current_a[index], " A", 2)
+
+
 def channel_status(snapshot: Snapshot, index: int, connected: bool, now: float) -> str:
     if not connected:
         return "Disconnected"
     if snapshot.stale(now):
         return "Stale reading"
+    if index == 0 and snapshot.commissioning_running:
+        commissioning = snapshot.commissioning
+        if commissioning.get("state") == 2:
+            return "Supervised · verifying shutdown"
+        if not commissioning.get("drive"):
+            return "Supervised · GPIO-low dry run"
+        if commissioning.get("kind") == 5 and commissioning.get("control_state") == 2:
+            return "Supervised · holding, cooling OFF"
+        return "Supervised · cooling"
     fault = snapshot.faults[index]
     if snapshot.outputs_locked_off:
         labels = []

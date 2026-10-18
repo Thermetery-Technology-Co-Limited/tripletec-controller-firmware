@@ -612,6 +612,14 @@
     }
   ],
   "operator_reported_12v_state": "on; supplied by the same computer PSU; operator requests continued diagnostics",
-  "physical_output_voltage_verified": false,
-  "current_calibrated": false
+  "current_calibrated": false,
+  "operator_static_output_voltage_v": 0.0,
+  "operator_static_output_voltage_check_passed": true,
+  "static_voltage_check_scope": "Operator multimeter DC measurement across connected TEC1 while stopped; transient and active-switching behavior not established.",
+  "operator_reported_thermal_setup": {
+    "probe1_attached_to_cold_face": true,
+    "hot_face_heatsink_and_running_cooling_ready": true
+  },
+  "operator_selected_tec1_trip": "Keep TEC1 unset for now",
+  "active_switching_test_performed": false
 }

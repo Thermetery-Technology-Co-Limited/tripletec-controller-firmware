@@ -1,0 +1,2 @@
+{"type": "DOCHEAD"}||{"docType": "DEVICE", "client": "f835f486968fa502", "uuid": "561368ec5b4fcd93", "updateTime": 1789032041352, "version": "1767178132", "editVersion": "3.2.149.88089769"}|
+{"type": "META", "ticket": 9424, "id": "META"}||{"title":"Power-VCC","tags":["特殊器件","网络标识"],"source":"b381658129d94456b54f23250ef5a375|0819f05c4eef4c71ace90d822a990e87","images":[""],"attributes":{"Global Net Name":"VCC","Name":"VCC","Description":"","Symbol":"9704756606db2560","3D Model":"","3D Model Title":"","3D Model Transform":""}}|

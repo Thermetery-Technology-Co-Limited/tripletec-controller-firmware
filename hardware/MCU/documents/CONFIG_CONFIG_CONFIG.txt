@@ -1,0 +1,3 @@
+{"type": "DOCHEAD"}||{"docType": "CONFIG", "client": "8e1b79e4143ae472", "uuid": "CONFIG", "updateTime": 1789028711578, "version": "1789028711578", "editVersion": "3.2.149.88089769", "user": {"uuid": "5e90a86f359249dcaedc82ca2dd01cf9", "nickname": "<redacted>", "username": "<redacted>", "avatar": "<redacted>"}}|
+{"type": "UNIVERSAL", "ticket": 1, "id": "UNIVERSAL"}||{"allowLibRename":true,"defaultNetName":true,"wireMultipleNet":true,"netFlagCrossLayerConnection":true,"netLabelCrossPageConnection":true,"busGenerateNetClass":true,"relevanceDisplayRow":"SINGLE","relevanceBelongSchPage":"NAME","relevanceLocation":"ZONE","multipartCrossLayer":true}|
+{"type": "META", "ticket": 60, "id": "META"}||{"defaultSheet":"b8299d73886bd9ff"}|

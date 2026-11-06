@@ -1,0 +1,2 @@
+{"type": "DOCHEAD"}||{"docType": "DEVICE", "client": "f835f486968fa502", "uuid": "5690a3bf15bc569e", "updateTime": 1789028843664, "version": "1767178184", "editVersion": "3.2.149.88089769"}|
+{"type": "META", "ticket": 475, "id": "META"}||{"title":"Ground-GND_1","tags":["特殊器件","网络标识"],"source":"9a64ac5790a940f7ae40fc736dc6faff|0819f05c4eef4c71ace90d822a990e87","images":"","attributes":{"Global Net Name":"GND","Name":"GND","Description":"","Symbol":"9f3c5e841c274014","3D Model":"","3D Model Title":"","3D Model Transform":""}}|

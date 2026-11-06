@@ -1,0 +1,4 @@
+{"type": "DOCHEAD"}||{"docType": "SCH", "client": "eff1ea614420cdcd", "uuid": "c2060d0969a59154", "updateTime": 1789390922765, "version": "1789390922765", "editVersion": "3.2.149.88089769"}|
+{"type": "RULE", "ticket": 18937, "id": "[\"RULE\",\"TRACK\",\"copperThickness1oz\"]"}||{"ruleState":"DEFAULT","ruleContext":{"unit":"mm","track":{"isOpen":true,"content":[{"layerId":1,"stroDef":0.254,"stroMax":2.54,"stroMin":0.127}]}}}|
+{"type": "RULE", "ticket": 18938, "id": "[\"RULE\",\"TRACK\",\"copperThickness2oz\"]"}||{"ruleState":"NORMAL","ruleContext":{"unit":"mm","track":{"isOpen":true,"content":[{"layerId":1,"stroDef":0.254,"stroMax":2.54,"stroMin":0.203}]}}}|
+{"type": "META", "ticket": 61870, "id": "META"}||{"title":"TripleTECDriver_MCU","source":"","board":"b9faf58226fde1ae","zIndex":null}|

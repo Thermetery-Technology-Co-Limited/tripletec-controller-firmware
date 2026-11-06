@@ -1,0 +1,2 @@
+{"type": "DOCHEAD"}||{"docType": "DEVICE", "client": "f835f486968fa502", "uuid": "59c182615563b575", "updateTime": 1789028843729, "version": "1758697781", "editVersion": "3.2.149.88089769"}|
+{"type": "META", "ticket": 485, "id": "META"}||{"title":"Power-VCC","tags":[],"source":"b381658129d94456b54f23250ef5a375|0819f05c4eef4c71ace90d822a990e87","images":[""],"attributes":{"Symbol":"a6b392fd327225a3","Global Net Name":"VCC","Name":"VCC","Description":""}}|

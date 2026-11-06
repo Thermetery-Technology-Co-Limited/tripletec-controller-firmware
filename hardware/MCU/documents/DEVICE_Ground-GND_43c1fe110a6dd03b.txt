@@ -1,0 +1,2 @@
+{"type": "DOCHEAD"}||{"docType": "DEVICE", "client": "f835f486968fa502", "uuid": "43c1fe110a6dd03b", "updateTime": 1789028875112, "version": "1684225550", "editVersion": "3.2.149.88089769"}|
+{"type": "META", "ticket": 4934, "id": "META"}||{"title":"Ground-GND","tags":[],"source":"9a64ac5790a940f7ae40fc736dc6faff|0819f05c4eef4c71ace90d822a990e87","images":[""],"attributes":{"Global Net Name":"GND","Name":"GND","Symbol":"bcf2621e2fe49597","3D Model":"","3D Model Title":"","3D Model Transform":"","Description":""}}|
